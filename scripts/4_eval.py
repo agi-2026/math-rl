@@ -28,7 +28,7 @@ from tinker_cookbook.recipes.math_rl.math_env import extract_gsm8k_final_answer,
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scripts.utils.data import load_gsm8k_test, load_math500
+from scripts.utils.data import load_gsm8k_test, load_math500, load_aime_2024, load_aime_2025
 from scripts.utils.tinker_helpers import STUDENT_MODEL, get_service_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -57,6 +57,16 @@ BENCHMARKS = {
         "loader": load_math500,
         "get_question": lambda row: row["problem"],
         "get_ground_truth": lambda row: row["answer"],
+    },
+    "aime2024": {
+        "loader": load_aime_2024,
+        "get_question": lambda row: row["problem"],
+        "get_ground_truth": lambda row: str(row["answer"]),
+    },
+    "aime2025": {
+        "loader": load_aime_2025,
+        "get_question": lambda row: row["problem"],
+        "get_ground_truth": lambda row: str(row["answer"]),
     },
 }
 
@@ -144,8 +154,8 @@ def evaluate_checkpoint(
 
 def main():
     parser = argparse.ArgumentParser(description="Unified evaluation & ablations")
-    parser.add_argument("--experiments", default="baseline,sft_custom,grpo")
-    parser.add_argument("--benchmarks", default="gsm8k,math500")
+    parser.add_argument("--experiments", default="baseline,direct_rl")
+    parser.add_argument("--benchmarks", default="gsm8k,math500,aime2024,aime2025")
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--output-dir", default="results/ablation")
     parser.add_argument("--tinker-url", default=None)

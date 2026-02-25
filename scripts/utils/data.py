@@ -51,6 +51,23 @@ def load_aime_2025() -> datasets.Dataset:
     return cast(datasets.Dataset, ds)
 
 
+def load_math_train() -> datasets.Dataset:
+    """Load full MATH training set (all subjects, ~7.5k problems).
+
+    Fields: problem, level, type, solution.
+    Answers are in \\boxed{} format within the solution field.
+    """
+    all_splits = []
+    for config_name in [
+        "algebra", "counting_and_probability", "geometry",
+        "intermediate_algebra", "number_theory", "prealgebra", "precalculus",
+    ]:
+        ds = datasets.load_dataset("EleutherAI/hendrycks_math", config_name, split="train")
+        all_splits.append(cast(datasets.Dataset, ds))
+    combined = datasets.concatenate_datasets(all_splits)
+    return cast(datasets.Dataset, combined)
+
+
 def save_traces_jsonl(traces: list[dict], output_path: str) -> None:
     """Save reasoning traces to JSONL format."""
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)

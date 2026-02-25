@@ -5,15 +5,17 @@ Follows tinker_cookbook/recipes/rl_loop.py pattern exactly.
 Uses math correctness as verifiable reward.
 
 Usage:
-    python scripts/3_grpo_train.py --config configs/grpo_config.yaml
+    python scripts/3_grpo_train.py --no-sft  # Direct RL (default)
+    python scripts/3_grpo_train.py --no-sft --dataset math  # Train on MATH
+    python scripts/3_grpo_train.py --no-sft --dataset gsm8k  # Train on GSM8K
     python scripts/3_grpo_train.py --sft-checkpoint /tmp/tinker-math/sft
-    python scripts/3_grpo_train.py --no-sft  # Direct RL ablation
 """
 
 import argparse
 import json
 import logging
 import os
+import random
 import sys
 import time
 from concurrent.futures import Future
@@ -33,6 +35,7 @@ from tinker_cookbook.tokenizer_utils import get_tokenizer
 from tinker_cookbook.utils import ml_log
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scripts.utils.data import load_gsm8k_train, load_math_train
 from scripts.utils.tinker_helpers import STUDENT_MODEL, get_service_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -63,11 +66,20 @@ def load_config(config_path: str | None = None) -> dict:
     return config
 
 
-def get_reward(response: str, answer: str) -> float:
-    """Reward function matching rl_loop.py exactly."""
+def get_reward_gsm8k(response: str, answer: str) -> float:
+    """Reward for GSM8K: answer is in #### format."""
     try:
         given_answer = extract_boxed(response)
         ground_truth = extract_gsm8k_final_answer(answer)
+        return 1.0 if grade_answer(given_answer, ground_truth) else 0.0
+    except ValueError:
+        return 0.0
+
+
+def get_reward_math(response: str, ground_truth: str) -> float:
+    """Reward for MATH: ground_truth is already the answer string."""
+    try:
+        given_answer = extract_boxed(response)
         return 1.0 if grade_answer(given_answer, ground_truth) else 0.0
     except ValueError:
         return 0.0
@@ -78,6 +90,8 @@ def main():
     parser.add_argument("--config", default="configs/grpo_config.yaml")
     parser.add_argument("--sft-checkpoint", default="/tmp/tinker-math/sft")
     parser.add_argument("--no-sft", action="store_true")
+    parser.add_argument("--dataset", default="math", choices=["math", "gsm8k"],
+                        help="Training data: 'math' (MATH train, harder) or 'gsm8k'")
     parser.add_argument("--log-path", default="/tmp/tinker-math/grpo")
     parser.add_argument("--tinker-url", default=None)
     args = parser.parse_args()
@@ -131,10 +145,27 @@ def main():
         )
         start_batch = 0
 
-    # Load GSM8K training data
-    dataset = datasets.load_dataset("openai/gsm8k", "main")
-    assert isinstance(dataset, datasets.DatasetDict)
-    train_dataset = dataset["train"]
+    # Load training data
+    if args.dataset == "math":
+        train_dataset = load_math_train()
+        get_question = lambda row: row["problem"]
+        # MATH ground truth is in \boxed{} within solution; extract it
+        def get_ground_truth(row):
+            try:
+                return extract_boxed(row["solution"])
+            except ValueError:
+                return row["solution"]
+        reward_fn = get_reward_math
+        logger.info(f"Training on MATH ({len(train_dataset)} problems)")
+    else:
+        train_dataset = load_gsm8k_train()
+        get_question = lambda row: row["question"]
+        get_ground_truth = lambda row: row["answer"]  # raw answer with ####
+        reward_fn = get_reward_gsm8k
+        logger.info(f"Training on GSM8K ({len(train_dataset)} problems)")
+
+    # Shuffle dataset
+    train_dataset = train_dataset.shuffle(seed=42)
 
     batch_size = config["batch_size"]
     group_size = config["group_size"]
@@ -182,7 +213,10 @@ def main():
         futures_P: list[Future[types.SampleResponse]] = []
         prompts_P: list[types.ModelInput] = []
 
-        for question in batch_rows["question"]:
+        questions_P = [get_question(row) for row in batch_rows]
+        ground_truths_P = [get_ground_truth(row) for row in batch_rows]
+
+        for question in questions_P:
             convo = [
                 *CONVO_PREFIX,
                 {"role": "user", "content": question + QUESTION_SUFFIX},
@@ -197,8 +231,8 @@ def main():
             prompts_P.append(model_input)
 
         # Collect results, compute advantages, build datums
-        for future, prompt, answer in tqdm(
-            zip(futures_P, prompts_P, batch_rows["answer"]),
+        for future, prompt, ground_truth in tqdm(
+            zip(futures_P, prompts_P, ground_truths_P),
             total=len(futures_P),
             desc=f"Batch {batch_idx}",
         ):
@@ -217,7 +251,7 @@ def main():
 
                 parsed_message, _ = renderer.parse_response(sampled_tokens)
                 content = renderers.get_text_content(parsed_message)
-                reward = get_reward(content, answer)
+                reward = reward_fn(content, ground_truth)
                 rewards_G.append(reward)
 
             # GRPO advantage centering
