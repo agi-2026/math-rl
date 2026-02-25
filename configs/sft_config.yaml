@@ -1,7 +1,7 @@
 # SFT Configuration for Qwen3-4B via Tinker
 # Phase 2: Supervised Fine-Tuning on teacher-distilled reasoning traces
 
-model_name: Qwen/Qwen3-4B
+model_name: Qwen/Qwen3-4B-Instruct-2507
 lora_rank: 64
 
 # Optimizer (linear decay from this LR to 0)

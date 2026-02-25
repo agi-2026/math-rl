@@ -83,8 +83,22 @@ def evaluate_benchmark(
     total = 0
     results = []
 
+    errors = 0
     for future, row, ground_truth in tqdm(futures, desc=f"Eval {benchmark_name}"):
-        sample_result = future.result()
+        try:
+            sample_result = future.result()
+        except Exception as e:
+            logger.warning(f"Sampling error: {e}")
+            errors += 1
+            total += 1
+            results.append({
+                "question": get_question(row),
+                "ground_truth": ground_truth,
+                "is_correct": False,
+                "response": f"ERROR: {e}",
+            })
+            continue
+
         sequence = sample_result.sequences[0]
 
         parsed_message, _ = renderer.parse_response(sequence.tokens)
@@ -106,6 +120,9 @@ def evaluate_benchmark(
             "is_correct": is_correct,
             "response": response_text[:500],
         })
+
+    if errors:
+        logger.warning(f"{errors}/{total} samples had sampling errors")
 
     accuracy = correct / total if total > 0 else 0.0
     ci = 1.96 * math.sqrt(accuracy * (1 - accuracy) / total) if total > 0 else 0.0
@@ -136,6 +153,7 @@ def main():
     )
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--output-dir", default="results/baseline")
+    parser.add_argument("--limit", type=int, default=0, help="Limit samples per benchmark (0=all)")
     parser.add_argument("--tinker-url", default=None)
     args = parser.parse_args()
 
@@ -156,6 +174,8 @@ def main():
 
     if "gsm8k" in args.benchmarks:
         dataset = load_gsm8k_test()
+        if args.limit > 0:
+            dataset = dataset.select(range(min(args.limit, len(dataset))))
         summary = evaluate_benchmark(
             sampling_client=sampling_client,
             renderer=renderer,
@@ -170,6 +190,8 @@ def main():
 
     if "math500" in args.benchmarks:
         dataset = load_math500()
+        if args.limit > 0:
+            dataset = dataset.select(range(min(args.limit, len(dataset))))
         summary = evaluate_benchmark(
             sampling_client=sampling_client,
             renderer=renderer,

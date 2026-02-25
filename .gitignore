@@ -1,5 +1,5 @@
 data/
-results/
+# results/ — tracked for reproducibility
 __pycache__/
 *.pyc
 .env

@@ -13,8 +13,8 @@ from tinker_cookbook import model_info, renderers
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 
 # Model identifiers on Tinker
-STUDENT_MODEL = "Qwen/Qwen3-4B"
-TEACHER_MODEL = "Qwen/Qwen3-235B-A22B-Instruct"
+STUDENT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+TEACHER_MODEL = "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
 # Default LoRA config
 DEFAULT_LORA_RANK = 64
