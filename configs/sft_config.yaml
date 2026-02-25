@@ -1,0 +1,20 @@
+# SFT Configuration for Qwen3-4B-Instruct via Tinker
+# Phase 2: Supervised Fine-Tuning on teacher-distilled reasoning traces
+
+model_name: qwen3-4b-instruct-2507
+lora_rank: 64
+
+# Optimizer
+learning_rate: 2.0e-5
+weight_decay: 0.01
+
+# Training
+epochs: 3
+batch_size: 4
+gradient_accumulation_steps: 8   # effective batch = 32
+max_seq_length: 2048
+warmup_ratio: 0.05
+
+# Logging & checkpointing
+save_every_epoch: true
+log_every: 10
