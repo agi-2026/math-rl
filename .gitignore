@@ -5,3 +5,6 @@ __pycache__/
 .env
 checkpoints/
 wandb/
+.venv/
+tinker-cookbook/
+*.egg-info/

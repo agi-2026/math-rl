@@ -1,5 +1,5 @@
 """
-Phase 1: Teacher Distillation — Reasoning Trace Generation
+Phase 1: Teacher Distillation -- Reasoning Trace Generation
 
 Uses Qwen3-235B (via Tinker) to generate high-quality chain-of-thought
 reasoning traces on GSM8K training problems. These traces are used for
@@ -7,45 +7,39 @@ SFT cold-start in Phase 2.
 
 Usage:
     python scripts/1_generate_traces.py
-    python scripts/1_generate_traces.py --num-samples 4 --output data/traces.jsonl
-    python scripts/1_generate_traces.py --resume  # resume from partial output
+    python scripts/1_generate_traces.py --num-samples 4 --output data/traces_custom.jsonl
+    python scripts/1_generate_traces.py --resume
 """
 
 import argparse
 import json
 import logging
 import os
-import time
+import sys
 from concurrent.futures import Future
 
 import tinker
+from tinker import types
 from tqdm import tqdm
 
-from utils.answer_extraction import (
-    extract_gsm8k_final_answer,
-    extract_number_from_response,
-    is_equivalent,
-)
-from utils.data import build_chat_messages, load_gsm8k_train, save_traces_jsonl
-from utils.tinker_helpers import (
-    TEACHER_MODEL,
-    get_renderer,
-    get_service_client,
-    get_tokenizer,
-)
+from tinker_cookbook import model_info, renderers
+from tinker_cookbook.recipes.math_rl.math_grading import extract_boxed, grade_answer
+from tinker_cookbook.recipes.math_rl.math_env import extract_gsm8k_final_answer
+from tinker_cookbook.tokenizer_utils import get_tokenizer
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scripts.utils.data import load_gsm8k_train, save_traces_jsonl, load_traces_jsonl
+from scripts.utils.tinker_helpers import TEACHER_MODEL, get_service_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARN)
 
 SYSTEM_PROMPT = (
     "You are an expert math tutor. Solve the following problem step by step. "
     "Show your reasoning clearly, then provide your final answer inside \\boxed{}."
 )
-
-
-def count_tokens_approx(text: str) -> int:
-    """Rough token count (~4 chars per token for English)."""
-    return len(text) // 4
+QUESTION_SUFFIX = " Write your answer in \\boxed{} format."
 
 
 def generate_traces(
@@ -55,67 +49,42 @@ def generate_traces(
     num_samples: int = 4,
     max_tokens: int = 2048,
     temperature: float = 0.7,
-    min_trace_length: int = 100,
-    max_trace_length: int = 8000,
-    already_done: set = None,
+    min_trace_chars: int = 100,
+    max_trace_chars: int = 8000,
+    already_done: set | None = None,
 ) -> list[dict]:
-    """Generate reasoning traces for all problems in the dataset.
-
-    Args:
-        sampling_client: Tinker sampling client for the teacher model.
-        renderer: Chat renderer for the teacher model.
-        dataset: GSM8K training dataset.
-        num_samples: Number of completions per problem (K).
-        max_tokens: Max generation tokens per completion.
-        temperature: Sampling temperature.
-        min_trace_length: Min chars for a valid trace.
-        max_trace_length: Max chars for a valid trace.
-        already_done: Set of questions already processed (for resume).
-
-    Returns:
-        List of trace dicts.
-    """
+    """Generate reasoning traces for all problems in the dataset."""
     if already_done is None:
         already_done = set()
 
-    sampling_params = tinker.types.SamplingParams(
+    sampling_params = types.SamplingParams(
         max_tokens=max_tokens,
         temperature=temperature,
-        stop=renderer.get_stop_sequences() if renderer else [],
+        stop=renderer.get_stop_sequences(),
     )
 
     traces = []
-    skipped = 0
     no_correct = 0
 
-    # Process in batches to manage memory
-    batch_size = 32
-    problems = [
-        row for row in dataset if row["question"] not in already_done
-    ]
+    problems = [row for row in dataset if row["question"] not in already_done]
     logger.info(
         f"Generating traces for {len(problems)} problems "
-        f"({len(already_done)} already done, {num_samples} samples each)"
+        f"({len(already_done)} already done, K={num_samples})"
     )
 
+    # Process in batches to manage concurrent requests
+    batch_size = 32
     for batch_start in range(0, len(problems), batch_size):
         batch = problems[batch_start : batch_start + batch_size]
 
-        # Submit all sampling requests for this batch
+        # Submit sampling requests
         futures: list[tuple[Future, dict]] = []
         for row in batch:
-            question = row["question"]
-            messages = [
+            convo = [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": question},
+                {"role": "user", "content": row["question"] + QUESTION_SUFFIX},
             ]
-
-            if renderer:
-                model_input = renderer.build_generation_prompt(messages)
-            else:
-                model_input = tinker.types.ModelInput.from_text(
-                    f"{SYSTEM_PROMPT}\n\n{question}\n\n"
-                )
+            model_input = renderer.build_generation_prompt(convo)
 
             future = sampling_client.sample(
                 prompt=model_input,
@@ -124,7 +93,7 @@ def generate_traces(
             )
             futures.append((future, row))
 
-        # Collect and filter results
+        # Collect and filter
         for future, row in tqdm(
             futures,
             desc=f"Batch {batch_start // batch_size + 1}",
@@ -137,31 +106,24 @@ def generate_traces(
             valid_traces = []
 
             for sequence in sample_result.sequences:
-                if renderer:
-                    parsed_message, _ = renderer.parse_response(sequence.tokens)
-                    from tinker_cookbook import renderers as r
-                    response_text = r.get_text_content(parsed_message)
-                else:
-                    response_text = sequence.text
+                parsed_message, _ = renderer.parse_response(sequence.tokens)
+                response_text = renderers.get_text_content(parsed_message)
 
-                # Filter 1: Must have a parseable answer
-                extracted = extract_number_from_response(response_text)
-                if extracted is None:
+                # Filter: must have \boxed{} and be correct
+                try:
+                    given_answer = extract_boxed(response_text)
+                    if not grade_answer(given_answer, ground_truth):
+                        continue
+                except ValueError:
                     continue
 
-                # Filter 2: Answer must be correct
-                if not is_equivalent(extracted, ground_truth):
-                    continue
-
-                # Filter 3: Must be reasonable length (not too short or long)
+                # Filter: reasonable length
                 char_len = len(response_text)
-                if char_len < min_trace_length or char_len > max_trace_length:
+                if char_len < min_trace_chars or char_len > max_trace_chars:
                     continue
 
-                # Filter 4: Must contain step-by-step reasoning
-                # (heuristic: has multiple sentences/steps)
+                # Filter: must have step-by-step reasoning
                 if response_text.count(".") < 2 and response_text.count("\n") < 2:
-                    skipped += 1
                     continue
 
                 valid_traces.append({
@@ -173,15 +135,15 @@ def generate_traces(
                 no_correct += 1
                 continue
 
-            # Select the shortest correct trace (prefer concise reasoning)
+            # Select shortest correct trace
             best = min(valid_traces, key=lambda t: t["length"])
 
             trace = {
-                "messages": build_chat_messages(
-                    problem=question,
-                    system_prompt=SYSTEM_PROMPT,
-                    response=best["text"],
-                ),
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": question + QUESTION_SUFFIX},
+                    {"role": "assistant", "content": best["text"]},
+                ],
                 "problem": question,
                 "ground_truth": ground_truth,
                 "source": "teacher_distillation",
@@ -194,45 +156,43 @@ def generate_traces(
 
     logger.info(
         f"Generated {len(traces)} traces from {len(problems)} problems "
-        f"({no_correct} had no correct completions, {skipped} skipped for quality)"
+        f"({no_correct} had no correct completions)"
     )
     return traces
 
 
 def main():
     parser = argparse.ArgumentParser(description="Generate teacher distillation traces")
-    parser.add_argument("--num-samples", type=int, default=4, help="Completions per problem (K)")
+    parser.add_argument("--num-samples", type=int, default=4)
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--output", default="data/traces_custom.jsonl")
-    parser.add_argument("--resume", action="store_true", help="Resume from existing output")
+    parser.add_argument("--resume", action="store_true")
     parser.add_argument("--tinker-url", default=None)
     args = parser.parse_args()
 
     # Setup Tinker with teacher model
     service_client = get_service_client(args.tinker_url)
     tokenizer = get_tokenizer(TEACHER_MODEL)
-    renderer = get_renderer(TEACHER_MODEL, tokenizer)
+    renderer_name = model_info.get_recommended_renderer_name(TEACHER_MODEL)
+    renderer = renderers.get_renderer(renderer_name, tokenizer)
+    logger.info(f"Teacher: {TEACHER_MODEL}, Renderer: {renderer_name}")
 
-    # Create sampling client for teacher model
     training_client = service_client.create_lora_training_client(
         base_model=TEACHER_MODEL, rank=8
     )
     sampling_client = training_client.save_weights_and_get_sampling_client()
 
-    # Load dataset
     dataset = load_gsm8k_train()
 
     # Handle resume
     already_done = set()
     existing_traces = []
     if args.resume and os.path.exists(args.output):
-        from utils.data import load_traces_jsonl
         existing_traces = load_traces_jsonl(args.output)
         already_done = {t["problem"] for t in existing_traces}
         logger.info(f"Resuming: {len(already_done)} problems already processed")
 
-    # Generate traces
     new_traces = generate_traces(
         sampling_client=sampling_client,
         renderer=renderer,
@@ -243,12 +203,10 @@ def main():
         already_done=already_done,
     )
 
-    # Combine with existing traces
     all_traces = existing_traces + new_traces
     save_traces_jsonl(all_traces, args.output)
     logger.info(f"Saved {len(all_traces)} total traces to {args.output}")
 
-    # Print statistics
     print(f"\n{'='*60}")
     print("TRACE GENERATION SUMMARY")
     print(f"{'='*60}")

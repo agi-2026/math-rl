@@ -1,7 +1,14 @@
-tinker-api>=0.1.0
-datasets>=2.14.0
-numpy>=1.24.0
+# Core
+tinker>=0.13.0
+datasets>=4.0.0
+torch>=2.0.0
 pyyaml>=6.0
 tqdm>=4.65.0
+
+# Math grading
 sympy>=1.12
-scipy>=1.11.0
+pylatexenc>=2.10
+math-verify>=0.9.0
+
+# tinker-cookbook (install from local clone)
+# pip install -e ./tinker-cookbook

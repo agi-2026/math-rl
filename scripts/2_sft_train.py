@@ -1,20 +1,19 @@
 """
 Phase 2: Supervised Fine-Tuning (SFT) via Tinker
 
-Fine-tunes Qwen3-4B-Instruct on teacher-distilled reasoning traces
-using LoRA through Tinker's API.
+Fine-tunes Qwen3-4B on teacher-distilled reasoning traces using LoRA.
+Follows the tinker_cookbook/recipes/sl_loop.py pattern exactly.
 
 Usage:
     python scripts/2_sft_train.py --config configs/sft_config.yaml
     python scripts/2_sft_train.py --data data/traces_custom.jsonl
-    python scripts/2_sft_train.py --data data/traces_public.jsonl --output-dir results/sft_public
 """
 
 import argparse
 import json
 import logging
-import math
 import os
+import sys
 import time
 
 import tinker
@@ -22,35 +21,33 @@ from tinker import types
 import yaml
 from tqdm import tqdm
 
-from utils.data import load_traces_jsonl
-from utils.tinker_helpers import (
-    STUDENT_MODEL,
-    build_sft_datum,
-    get_renderer,
-    get_service_client,
-    get_tokenizer,
-)
+from tinker_cookbook import checkpoint_utils, model_info, renderers
+from tinker_cookbook.supervised.common import compute_mean_nll
+from tinker_cookbook.supervised.data import conversation_to_datum
+from tinker_cookbook.tokenizer_utils import get_tokenizer
+from tinker_cookbook.utils import ml_log
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scripts.utils.data import load_traces_jsonl
+from scripts.utils.tinker_helpers import STUDENT_MODEL, get_service_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARN)
 
 DEFAULT_CONFIG = {
     "model_name": STUDENT_MODEL,
     "lora_rank": 64,
     "learning_rate": 2e-5,
-    "epochs": 3,
-    "batch_size": 4,
-    "gradient_accumulation_steps": 8,
-    "max_seq_length": 2048,
-    "warmup_ratio": 0.05,
-    "weight_decay": 0.01,
-    "save_every_epoch": True,
-    "log_every": 10,
+    "num_epochs": 3,
+    "batch_size": 128,
+    "max_length": 4096,
+    "save_every": 20,
+    "train_on_what": "all_assistant_messages",
 }
 
 
-def load_config(config_path: str = None) -> dict:
-    """Load config from YAML, falling back to defaults."""
+def load_config(config_path: str | None = None) -> dict:
     config = DEFAULT_CONFIG.copy()
     if config_path and os.path.exists(config_path):
         with open(config_path) as f:
@@ -64,8 +61,7 @@ def main():
     parser = argparse.ArgumentParser(description="SFT training via Tinker")
     parser.add_argument("--config", default="configs/sft_config.yaml")
     parser.add_argument("--data", default="data/traces_custom.jsonl")
-    parser.add_argument("--output-dir", default="results/sft_custom")
-    parser.add_argument("--checkpoint-dir", default="checkpoints/sft")
+    parser.add_argument("--log-path", default="/tmp/tinker-math/sft")
     parser.add_argument("--tinker-url", default=None)
     args = parser.parse_args()
 
@@ -76,145 +72,151 @@ def main():
     traces = load_traces_jsonl(args.data)
     logger.info(f"Loaded {len(traces)} training traces from {args.data}")
 
-    # Setup Tinker
+    # Setup Tinker (follows sl_loop.py pattern)
+    model_name = config["model_name"]
     service_client = get_service_client(args.tinker_url)
-    tokenizer = get_tokenizer(config["model_name"])
-    renderer = get_renderer(config["model_name"], tokenizer)
+    tokenizer = get_tokenizer(model_name)
+    renderer_name = model_info.get_recommended_renderer_name(model_name)
+    renderer = renderers.get_renderer(renderer_name, tokenizer)
+    logger.info(f"Model: {model_name}, Renderer: {renderer_name}")
 
-    training_client = service_client.create_lora_training_client(
-        base_model=config["model_name"],
-        rank=config["lora_rank"],
+    train_on_what = renderers.TrainOnWhat(config["train_on_what"])
+
+    # Setup logging
+    ml_logger = ml_log.setup_logging(
+        log_dir=args.log_path,
+        wandb_project=None,
+        wandb_name=None,
+        config=config,
+        do_configure_logging_module=True,
     )
 
-    # Build datums
-    logger.info("Building SFT datums...")
-    datums = []
-    skipped = 0
-    for trace in tqdm(traces, desc="Tokenizing"):
-        datum = build_sft_datum(
-            messages=trace["messages"],
-            tokenizer=tokenizer,
-            renderer=renderer,
-            max_seq_length=config["max_seq_length"],
+    # Check for resume
+    resume_info = checkpoint_utils.get_last_checkpoint(args.log_path)
+    if resume_info:
+        training_client = service_client.create_training_client_from_state_with_optimizer(
+            resume_info["state_path"]
         )
-        if datum is not None:
-            datums.append(datum)
-        else:
-            skipped += 1
+        start_step = resume_info.get("batch", 0)
+        logger.info(f"Resuming from step {start_step}")
+    else:
+        training_client = service_client.create_lora_training_client(
+            base_model=model_name, rank=config["lora_rank"]
+        )
+        start_step = 0
 
-    logger.info(f"Built {len(datums)} datums ({skipped} skipped for length)")
+    # Build datums from traces (using conversation_to_datum from tinker_cookbook)
+    # Each trace has a "messages" field with [system, user, assistant] messages
+    logger.info("Building datums...")
+    all_messages = [t["messages"] for t in traces]
 
-    # Training loop
     batch_size = config["batch_size"]
-    grad_accum = config["gradient_accumulation_steps"]
-    effective_batch = batch_size * grad_accum
-    num_epochs = config["epochs"]
-    steps_per_epoch = math.ceil(len(datums) / effective_batch)
-    total_steps = steps_per_epoch * num_epochs
-    warmup_steps = int(total_steps * config["warmup_ratio"])
-
-    adam_params = types.AdamParams(
-        learning_rate=config["learning_rate"],
-        beta1=0.9,
-        beta2=0.999,
-        eps=1e-8,
-        weight_decay=config["weight_decay"],
-    )
+    max_length = config["max_length"]
+    n_batches_per_epoch = len(all_messages) // batch_size
+    total_steps = n_batches_per_epoch * config["num_epochs"]
 
     logger.info(
-        f"Training: {num_epochs} epochs, {steps_per_epoch} steps/epoch, "
-        f"effective batch={effective_batch}, total steps={total_steps}"
+        f"Training: {config['num_epochs']} epochs, {n_batches_per_epoch} batches/epoch, "
+        f"batch_size={batch_size}, total_steps={total_steps}"
     )
 
-    os.makedirs(args.output_dir, exist_ok=True)
-    os.makedirs(args.checkpoint_dir, exist_ok=True)
-    metrics_log = []
+    import random
+    global_step = start_step
 
-    global_step = 0
-    for epoch in range(num_epochs):
-        logger.info(f"=== Epoch {epoch + 1}/{num_epochs} ===")
+    for epoch in range(config["num_epochs"]):
+        logger.info(f"=== Epoch {epoch + 1}/{config['num_epochs']} ===")
+        random.shuffle(all_messages)
 
-        # Shuffle data each epoch
-        import random
-        random.shuffle(datums)
-
-        epoch_loss = 0.0
-        epoch_batches = 0
-
-        for step_in_epoch in range(steps_per_epoch):
-            t_start = time.time()
-
-            # Get batch
-            start_idx = step_in_epoch * effective_batch
-            end_idx = min(start_idx + effective_batch, len(datums))
-            batch_datums = datums[start_idx:end_idx]
-
-            if not batch_datums:
+        for batch_idx in range(n_batches_per_epoch):
+            if global_step < start_step:
+                global_step += 1
                 continue
 
-            # Forward-backward (Tinker handles grad accumulation internally
-            # when we pass the full effective batch)
-            fwd_bwd_future = training_client.forward_backward(
-                batch_datums, loss_fn="cross_entropy"
+            t_start = time.time()
+            metrics: dict[str, float] = {}
+
+            # Save checkpoint
+            if config["save_every"] > 0 and global_step % config["save_every"] == 0 and global_step > 0:
+                checkpoint_utils.save_checkpoint(
+                    training_client=training_client,
+                    name=f"{global_step:06d}",
+                    log_path=args.log_path,
+                    kind="state",
+                    loop_state={"batch": global_step},
+                )
+
+            # Linear LR decay
+            lr_mult = max(0.0, 1.0 - global_step / total_steps)
+            current_lr = config["learning_rate"] * lr_mult
+            adam_params = tinker.AdamParams(
+                learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8
             )
 
-            # Optimizer step
+            # Get batch and convert to datums
+            batch_start = batch_idx * batch_size
+            batch_end = min(batch_start + batch_size, len(all_messages))
+            batch_messages = all_messages[batch_start:batch_end]
+
+            batch = [
+                conversation_to_datum(msgs, renderer, max_length, train_on_what)
+                for msgs in batch_messages
+            ]
+
+            # Training step (forward_backward + optim_step pipelined)
+            fwd_bwd_future = training_client.forward_backward(batch, loss_fn="cross_entropy")
             optim_future = training_client.optim_step(adam_params)
 
             fwd_bwd_result = fwd_bwd_future.result()
             optim_result = optim_future.result()
 
-            step_time = time.time() - t_start
-            global_step += 1
-
-            # Log metrics
-            step_metrics = {
-                "epoch": epoch + 1,
-                "step": global_step,
-                "step_in_epoch": step_in_epoch + 1,
-                "batch_size": len(batch_datums),
-                "time": step_time,
-            }
             if optim_result.metrics:
-                step_metrics.update(optim_result.metrics)
+                metrics.update(optim_result.metrics)
 
-            metrics_log.append(step_metrics)
+            # Compute NLL
+            train_logprobs = [x["logprobs"] for x in fwd_bwd_result.loss_fn_outputs]
+            train_weights = [d.loss_fn_inputs["weights"] for d in batch]
+            train_nll = compute_mean_nll(train_logprobs, train_weights)
 
-            if global_step % config["log_every"] == 0:
-                loss_str = step_metrics.get("loss", "N/A")
+            metrics.update(
+                epoch=epoch + 1,
+                step=global_step,
+                num_sequences=len(batch),
+                num_tokens=sum(d.model_input.length for d in batch),
+                learning_rate=current_lr,
+                train_mean_nll=train_nll,
+                progress=global_step / total_steps,
+                time_total=time.time() - t_start,
+            )
+            ml_logger.log_metrics(metrics=metrics, step=global_step)
+
+            if global_step % 10 == 0:
                 logger.info(
                     f"  Step {global_step}/{total_steps} | "
-                    f"loss={loss_str} | "
-                    f"time={step_time:.1f}s"
+                    f"NLL={train_nll:.4f} | LR={current_lr:.2e} | "
+                    f"time={time.time()-t_start:.1f}s"
                 )
 
-        # Save checkpoint after each epoch
-        if config["save_every_epoch"]:
-            ckpt_path = os.path.join(args.checkpoint_dir, f"epoch_{epoch + 1}")
-            training_client.save_state(ckpt_path)
-            logger.info(f"Saved checkpoint: {ckpt_path}")
+            global_step += 1
 
     # Save final checkpoint
-    final_path = os.path.join(args.checkpoint_dir, "final")
-    training_client.save_state(final_path)
-    logger.info(f"Saved final checkpoint: {final_path}")
+    checkpoint_utils.save_checkpoint(
+        training_client=training_client,
+        name="final",
+        log_path=args.log_path,
+        kind="both",
+        loop_state={"batch": global_step},
+    )
 
-    # Save training metrics
-    with open(os.path.join(args.output_dir, "training_metrics.json"), "w") as f:
-        json.dump(metrics_log, f, indent=2)
-
-    # Save config for reproducibility
-    with open(os.path.join(args.output_dir, "config_used.json"), "w") as f:
-        json.dump(config, f, indent=2)
+    ml_logger.close()
+    logger.info("SFT training completed")
 
     print(f"\n{'='*60}")
     print("SFT TRAINING COMPLETE")
     print(f"{'='*60}")
-    print(f"  Data:            {args.data} ({len(datums)} samples)")
-    print(f"  Epochs:          {num_epochs}")
-    print(f"  Total steps:     {total_steps}")
-    print(f"  Checkpoint:      {final_path}")
-    print(f"  Metrics:         {args.output_dir}/training_metrics.json")
+    print(f"  Data:            {args.data} ({len(traces)} traces)")
+    print(f"  Epochs:          {config['num_epochs']}")
+    print(f"  Total steps:     {global_step}")
+    print(f"  Checkpoint:      {args.log_path}")
     print(f"{'='*60}")
 
 

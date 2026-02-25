@@ -1,12 +1,12 @@
 """
 Phase 4: Unified Evaluation & Ablation Studies
 
-Evaluates all model checkpoints on GSM8K test and MATH-500.
-Produces a comparison table for the ablation study.
+Evaluates model checkpoints on GSM8K test and MATH-500.
+Produces a comparison table for ablation study.
 
 Usage:
     python scripts/4_eval.py
-    python scripts/4_eval.py --checkpoints baseline,sft_custom,sft_public,grpo,direct_rl
+    python scripts/4_eval.py --experiments baseline,sft_custom,grpo
     python scripts/4_eval.py --benchmarks gsm8k,math500
 """
 
@@ -15,43 +15,38 @@ import json
 import logging
 import math
 import os
+import sys
 from concurrent.futures import Future
-from typing import Optional
 
 import tinker
+from tinker import types
 from tqdm import tqdm
 
-from utils.answer_extraction import (
-    extract_gsm8k_final_answer,
-    extract_number_from_response,
-    is_equivalent,
-)
-from utils.data import load_gsm8k_test, load_math500
-from utils.tinker_helpers import (
-    STUDENT_MODEL,
-    get_renderer,
-    get_service_client,
-    get_tokenizer,
-)
+from tinker_cookbook import checkpoint_utils, model_info, renderers
+from tinker_cookbook.recipes.math_rl.math_grading import extract_boxed, grade_answer
+from tinker_cookbook.recipes.math_rl.math_env import extract_gsm8k_final_answer, MathEnv
+from tinker_cookbook.tokenizer_utils import get_tokenizer
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scripts.utils.data import load_gsm8k_test, load_math500
+from scripts.utils.tinker_helpers import STUDENT_MODEL, get_service_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARN)
 
-SYSTEM_PROMPT = (
-    "You are a helpful math assistant. Solve the problem step by step, "
-    "then provide your final answer inside \\boxed{}."
-)
+QUESTION_SUFFIX = MathEnv.question_suffix()
+CONVO_PREFIX = MathEnv.standard_fewshot_prefix()
 
-# Experiment definitions: name → checkpoint path (None = base model)
+# Experiment -> checkpoint log_path mapping
 EXPERIMENTS = {
-    "baseline": None,
-    "sft_custom": "checkpoints/sft/final",
-    "sft_public": "checkpoints/sft_public/final",
-    "grpo": "checkpoints/grpo/final",
-    "direct_rl": "checkpoints/direct_rl/final",
+    "baseline": None,  # No checkpoint = base model
+    "sft_custom": "/tmp/tinker-math/sft",
+    "sft_public": "/tmp/tinker-math/sft_public",
+    "grpo": "/tmp/tinker-math/grpo",
+    "direct_rl": "/tmp/tinker-math/direct_rl",
 }
 
-# Benchmark definitions
 BENCHMARKS = {
     "gsm8k": {
         "loader": load_gsm8k_test,
@@ -68,22 +63,27 @@ BENCHMARKS = {
 
 def evaluate_checkpoint(
     service_client,
-    tokenizer,
     renderer,
-    checkpoint_path: Optional[str],
+    checkpoint_log_path: str | None,
     benchmark_name: str,
     max_tokens: int = 2048,
 ) -> dict:
     """Evaluate a single checkpoint on a single benchmark."""
-
     bench = BENCHMARKS[benchmark_name]
     dataset = bench["loader"]()
 
-    # Create sampling client
-    if checkpoint_path and os.path.exists(checkpoint_path):
-        training_client = service_client.create_training_client_from_state_with_optimizer(
-            checkpoint_path
-        )
+    # Create sampling client from checkpoint or base model
+    if checkpoint_log_path:
+        resume_info = checkpoint_utils.get_last_checkpoint(checkpoint_log_path)
+        if resume_info:
+            training_client = service_client.create_training_client_from_state_with_optimizer(
+                resume_info["state_path"]
+            )
+        else:
+            logger.warning(f"No checkpoint at {checkpoint_log_path}, using base model")
+            training_client = service_client.create_lora_training_client(
+                base_model=STUDENT_MODEL, rank=8
+            )
     else:
         training_client = service_client.create_lora_training_client(
             base_model=STUDENT_MODEL, rank=8
@@ -91,35 +91,27 @@ def evaluate_checkpoint(
 
     sampling_client = training_client.save_weights_and_get_sampling_client()
 
-    sampling_params = tinker.types.SamplingParams(
+    sampling_params = types.SamplingParams(
         max_tokens=max_tokens,
         temperature=0.0,
-        stop=renderer.get_stop_sequences() if renderer else [],
+        stop=renderer.get_stop_sequences(),
     )
 
     # Submit all requests
     futures: list[tuple[Future, dict]] = []
     for row in dataset:
         question = bench["get_question"](row)
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": question},
+        convo = [
+            *CONVO_PREFIX,
+            {"role": "user", "content": question + QUESTION_SUFFIX},
         ]
-        if renderer:
-            model_input = renderer.build_generation_prompt(messages)
-        else:
-            model_input = tinker.types.ModelInput.from_text(
-                f"{SYSTEM_PROMPT}\n\n{question}\n\n"
-            )
-
+        model_input = renderer.build_generation_prompt(convo)
         future = sampling_client.sample(
-            prompt=model_input,
-            num_samples=1,
-            sampling_params=sampling_params,
+            prompt=model_input, num_samples=1, sampling_params=sampling_params,
         )
         futures.append((future, row))
 
-    # Collect results
+    # Collect
     correct = 0
     total = 0
     for future, row in tqdm(futures, desc=f"Eval {benchmark_name}"):
@@ -127,16 +119,15 @@ def evaluate_checkpoint(
         sample_result = future.result()
         sequence = sample_result.sequences[0]
 
-        if renderer:
-            parsed_message, _ = renderer.parse_response(sequence.tokens)
-            from tinker_cookbook import renderers as r
-            response_text = r.get_text_content(parsed_message)
-        else:
-            response_text = sequence.text
+        parsed_message, _ = renderer.parse_response(sequence.tokens)
+        response_text = renderers.get_text_content(parsed_message)
 
-        extracted = extract_number_from_response(response_text)
-        if extracted is not None and is_equivalent(extracted, ground_truth):
-            correct += 1
+        try:
+            given_answer = extract_boxed(response_text)
+            if grade_answer(given_answer, ground_truth):
+                correct += 1
+        except ValueError:
+            pass
         total += 1
 
     accuracy = correct / total if total > 0 else 0.0
@@ -147,53 +138,38 @@ def evaluate_checkpoint(
         "total": total,
         "accuracy": accuracy,
         "accuracy_pct": f"{accuracy * 100:.1f}%",
-        "ci_95": f"±{ci * 100:.1f}%",
+        "ci_95": f"+/-{ci * 100:.1f}%",
     }
 
 
 def main():
     parser = argparse.ArgumentParser(description="Unified evaluation & ablations")
-    parser.add_argument(
-        "--checkpoints",
-        default="baseline,sft_custom,grpo",
-        help="Comma-separated experiment names",
-    )
-    parser.add_argument(
-        "--benchmarks",
-        default="gsm8k,math500",
-        help="Comma-separated benchmark names",
-    )
+    parser.add_argument("--experiments", default="baseline,sft_custom,grpo")
+    parser.add_argument("--benchmarks", default="gsm8k,math500")
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--output-dir", default="results/ablation")
     parser.add_argument("--tinker-url", default=None)
     args = parser.parse_args()
 
-    experiment_names = [x.strip() for x in args.checkpoints.split(",")]
-    benchmark_names = [x.strip() for x in args.benchmarks.split(",")]
+    exp_names = [x.strip() for x in args.experiments.split(",")]
+    bench_names = [x.strip() for x in args.benchmarks.split(",")]
 
-    # Setup
     service_client = get_service_client(args.tinker_url)
     tokenizer = get_tokenizer(STUDENT_MODEL)
-    renderer = get_renderer(STUDENT_MODEL, tokenizer)
+    renderer_name = model_info.get_recommended_renderer_name(STUDENT_MODEL)
+    renderer = renderers.get_renderer(renderer_name, tokenizer)
 
-    # Run all evaluations
     results = {}
-    for exp_name in experiment_names:
+    for exp_name in exp_names:
         checkpoint_path = EXPERIMENTS.get(exp_name)
-
-        # Skip if checkpoint doesn't exist (except baseline)
-        if checkpoint_path and not os.path.exists(checkpoint_path):
-            logger.warning(f"Checkpoint for '{exp_name}' not found at {checkpoint_path}, skipping")
-            continue
-
         results[exp_name] = {}
-        for bench_name in benchmark_names:
+
+        for bench_name in bench_names:
             logger.info(f"Evaluating {exp_name} on {bench_name}...")
             result = evaluate_checkpoint(
                 service_client=service_client,
-                tokenizer=tokenizer,
                 renderer=renderer,
-                checkpoint_path=checkpoint_path,
+                checkpoint_log_path=checkpoint_path,
                 benchmark_name=bench_name,
                 max_tokens=args.max_tokens,
             )
@@ -204,19 +180,17 @@ def main():
     print("ABLATION STUDY RESULTS")
     print(f"{'='*70}")
 
-    # Header
     header = f"{'Experiment':<20}"
-    for bench in benchmark_names:
+    for bench in bench_names:
         header += f" | {bench:>15}"
     print(header)
     print("-" * 70)
 
-    # Rows
-    for exp_name in experiment_names:
+    for exp_name in exp_names:
         if exp_name not in results:
             continue
         row = f"{exp_name:<20}"
-        for bench in benchmark_names:
+        for bench in bench_names:
             if bench in results[exp_name]:
                 r = results[exp_name][bench]
                 row += f" | {r['accuracy_pct']:>8} {r['ci_95']:>6}"
@@ -226,7 +200,6 @@ def main():
 
     print(f"{'='*70}")
 
-    # Save results
     os.makedirs(args.output_dir, exist_ok=True)
     with open(os.path.join(args.output_dir, "ablation_results.json"), "w") as f:
         json.dump(results, f, indent=2)

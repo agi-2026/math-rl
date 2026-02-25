@@ -1,19 +1,16 @@
-# GRPO Configuration for Qwen3-4B-Instruct via Tinker
+# GRPO Configuration for Qwen3-4B via Tinker
 # Phase 3: Reinforcement Learning with verifiable math rewards
 
-model_name: qwen3-4b-instruct-2507
+model_name: Qwen/Qwen3-4B
 lora_rank: 64
 
 # Optimizer
 learning_rate: 4.0e-5
 
 # GRPO-specific
-group_size: 8          # K completions per problem
-batch_size: 128        # problems per batch
-max_tokens: 2048       # max generation tokens per completion
-temperature: 0.7       # sampling temperature for rollouts
-num_epochs: 2
+group_size: 16          # K completions per problem (for advantage estimation)
+batch_size: 128         # problems per batch
+max_tokens: 2048        # max generation tokens per completion
 
 # Logging & checkpointing
-save_every: 20         # save every N steps
-log_every: 1
+save_every: 20          # save checkpoint every N batches
