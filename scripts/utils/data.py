@@ -29,6 +29,28 @@ def load_math500() -> datasets.Dataset:
     return cast(datasets.Dataset, ds)
 
 
+def load_aime_2024() -> datasets.Dataset:
+    """Load AIME 2024 (30 problems: AIME I + II).
+
+    Fields: problem_idx, problem, answer (int64).
+    AIME answers are integers 0-999.
+    """
+    ds_i = datasets.load_dataset("MathArena/aime_2024_I", split="train")
+    ds_ii = datasets.load_dataset("MathArena/aime_2024_II", split="train")
+    combined = datasets.concatenate_datasets([cast(datasets.Dataset, ds_i), cast(datasets.Dataset, ds_ii)])
+    return cast(datasets.Dataset, combined)
+
+
+def load_aime_2025() -> datasets.Dataset:
+    """Load AIME 2025 (30 problems: AIME I + II combined).
+
+    Fields: problem_idx, problem, answer (int64), problem_type.
+    AIME answers are integers 0-999.
+    """
+    ds = datasets.load_dataset("MathArena/aime_2025", split="train")
+    return cast(datasets.Dataset, ds)
+
+
 def save_traces_jsonl(traces: list[dict], output_path: str) -> None:
     """Save reasoning traces to JSONL format."""
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
