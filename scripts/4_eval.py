@@ -155,7 +155,7 @@ def evaluate_checkpoint(
 def main():
     parser = argparse.ArgumentParser(description="Unified evaluation & ablations")
     parser.add_argument("--experiments", default="baseline,direct_rl")
-    parser.add_argument("--benchmarks", default="gsm8k,math500,aime2024,aime2025")
+    parser.add_argument("--benchmarks", default="math500,aime2024,aime2025")
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--output-dir", default="results/ablation")
     parser.add_argument("--tinker-url", default=None)
