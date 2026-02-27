@@ -1,36 +1,43 @@
-# DeepGrove Post-Training Assessment: Math Reasoning with SFT + RL
+# Math Reasoning Post-Training: SFT + RL on Qwen3-4B
 
 ## Overview
 
-This project demonstrates a complete post-training pipeline — from data generation through supervised fine-tuning (SFT) to reinforcement learning (GRPO) — applied to mathematical reasoning. The target is to measurably improve Qwen3-4B's math performance through a principled, reproducible pipeline that generalizes to other post-training domains (tool use, search, code).
+This project demonstrates a complete post-training pipeline for improving mathematical reasoning in a 4B-parameter language model. Starting from Qwen3-4B-Instruct, we explore supervised fine-tuning (SFT) via teacher distillation and reinforcement learning (GRPO) to push math performance significantly beyond the base model.
 
-**Base Model:** Qwen3-4B-Instruct-2507 (via Tinker)
-**Teacher Model:** Qwen3-235B-A22B-Instruct (via Tinker, for trace distillation)
-**Training Framework:** Tinker API (LoRA fine-tuning)
-**Training Data:** GSM8K (8.5k train) + teacher-distilled traces + public comparison data
-**Evaluation:** GSM8K test (1.3k) + MATH-500
-**Hardware:** 1x NVIDIA H100 80GB
+**Key result:** GRPO on hard math problems achieves **90.2% on MATH-500** (vs 79.4% baseline) and **43.3% on AIME 2024** (vs 20.0% baseline) — a +10.8pp and +23.3pp improvement respectively.
+
+| Component | Details |
+|-----------|---------|
+| **Base Model** | Qwen3-4B-Instruct-2507 |
+| **Teacher Model** | Qwen3-235B-A22B-Instruct-2507 |
+| **Training Framework** | [Tinker](https://tinker.dev) (cloud LoRA fine-tuning API) |
+| **RL Algorithm** | GRPO (Group Relative Policy Optimization) |
+| **Evaluation** | MATH-500, AIME 2024, AIME 2025, GSM8K, OlympiadBench |
 
 ---
 
-## Motivation
+## Results
 
-### Why Math Reasoning?
+### Final Ablation Table
 
-Math reasoning is the ideal domain for demonstrating post-training competence:
+All models evaluated with temperature=0.01, greedy-ish decoding, and 95% confidence intervals.
 
-1. **Verifiable reward signal.** The answer is unambiguously correct or incorrect — no need for a learned reward model. This makes RL clean and interpretable.
-2. **Well-studied baselines.** Qwen3-4B has known scores on GSM8K and MATH, so improvement is easy to measure.
-3. **The pipeline transfers directly.** The same SFT → RL pipeline applies to tool use and search — the only difference is the reward function and action space.
-4. **No infrastructure overhead.** No search backend, retrieval index, or API integration required. All time goes to the actual post-training work.
+| Model | MATH-500 | AIME 2024 | AIME 2025 | GSM8K | OlympiadBench |
+|---|---|---|---|---|---|
+| **Baseline** (Qwen3-4B) | 79.4% ±3.5 | 20.0% ±14.3 | 20.0% ±14.3 | 94.1% ±1.3 | 49.0% ±4.1 |
+| **SFT** (custom traces) | 77.2% ±3.7 | 10.0% ±10.7 | 16.7% ±13.3 | 93.2% ±1.4 | 48.4% ±4.1 |
+| **Direct RL** (GRPO v1) | 85.2% ±3.1 | 30.0% ±16.4 | 26.7% ±15.8 | 93.5% ±1.3 | 55.8% ±4.1 |
+| **SFT → RL** | 85.4% ±3.1 | 23.3% ±15.1 | 20.0% ±14.3 | 93.4% ±1.3 | 54.2% ±4.1 |
+| **GRPO v2** (hard problems) | **90.2% ±2.6** | **43.3% ±17.7** | 26.7% ±15.8 | 93.8% ±1.3 | **63.6% ±3.9** |
+| **GRPO v3** (continued) | 90.6% ±2.6 | 36.7% ±17.2 | **30.0% ±16.4** | **94.0% ±1.3** | 64.0% ±3.9 |
 
-### Connection to DeepGrove's Mission
+### Key Takeaways
 
-For on-device ternary models, post-training is critical because:
-- Base models need instruction tuning to be usable
-- Tool use (DeepGrove's target) requires the same SFT → RL pipeline demonstrated here
-- Math's verifiable reward mirrors tool use's verifiable reward (tool execution succeeds or fails)
-- The techniques explored here (STE-compatible SFT, GRPO, data curation) translate directly to ternary model post-training, with adjustments for higher learning rates, loss summation, and more training epochs (per Microsoft's BitNet findings)
+1. **RL is far more effective than SFT for small models.** GRPO v2 gains +10.8pp on MATH-500 over baseline; SFT actually hurts by -2.2pp.
+2. **SFT warm-start doesn't help RL.** Direct RL and SFT→RL converge to the same accuracy (85.2% vs 85.4%), making the SFT phase unnecessary overhead.
+3. **Training on hard problems is critical.** GRPO v2 (MATH Level 4-5 only) dramatically outperforms GRPO v1 (all difficulty levels): 90.2% vs 85.2% on MATH-500, 43.3% vs 30.0% on AIME 2024.
+4. **Longer generation context helps.** max_tokens=4096 (v2) vs 2048 (v1) allows the model to reason through harder problems.
+5. **Continued training gives diminishing returns.** v3 (2 more epochs at lower LR) only adds +0.4pp on MATH-500 over v2.
 
 ---
 
@@ -38,163 +45,170 @@ For on-device ternary models, post-training is critical because:
 
 ### Phase 0: Baseline Evaluation
 
-Before any training, establish Qwen3-4B-Instruct's baseline accuracy on both benchmarks to measure improvement.
+Evaluate the base Qwen3-4B-Instruct model on all benchmarks before any training. Uses few-shot prompting with the `MathEnv.standard_fewshot_prefix()` from the Tinker cookbook, and asks the model to put final answers in `\boxed{}` format.
 
-```
-Eval: Qwen3-4B-Instruct → GSM8K test (1,319 samples)
-Eval: Qwen3-4B-Instruct → MATH-500 (500 samples)
-```
-
-### Phase 1: Reasoning Trace Generation
-
-Generate high-quality chain-of-thought reasoning traces for SFT cold start.
-
-**Approach:** Use Qwen3-235B (via Tinker) as teacher to generate high-quality traces on GSM8K train, then filter.
-
-```
-For each GSM8K train problem:
-  1. Generate K=4 completions from Qwen3-235B with temperature=0.7
-  2. Extract final numerical answer from each completion
-  3. Compare against ground truth
-  4. Keep traces where:
-     - Answer is correct
-     - Reasoning is step-by-step (not just restating the answer)
-     - Length is within reasonable bounds (not too short, not pathologically long)
-  5. Select the shortest correct trace (prefer concise reasoning)
+```bash
+python scripts/0_baseline_eval.py
 ```
 
-**Why teacher distillation (Qwen3-235B → 4B):**
-- Much higher quality traces than self-generation — 235B has stronger reasoning
-- Consistent with recent literature (DeepSeek-R1 distillation, OpenThoughts)
-- Tinker makes this seamless — same API for sampling and training
+### Phase 1: Reasoning Trace Generation (Teacher Distillation)
 
-**Expected yield:** ~6-7k high-quality traces from 8.5k problems (some problems will have zero correct completions across K samples).
+Generate high-quality chain-of-thought reasoning traces by prompting Qwen3-235B-A22B-Instruct on training problems, then filtering for correctness.
 
-**Trace format:**
-```
-<system>You are a helpful math assistant. Solve the problem step by step.</system>
-<user>{problem}</user>
-<assistant><think>
-Let me break this down step by step.
-Step 1: ...
-Step 2: ...
-...
-</think>
+**Datasets used:**
+- **OlympiadBench** (numerical problems): 390 correct traces from ~500 problems
+- **MATH Level 4-5** (hard problems): 3,435 correct traces from 3,994 problems (~86% yield)
 
-The answer is **{answer}**.</assistant>
-```
+**Process:**
+1. For each problem, generate 1 completion from the teacher model
+2. Extract the `\boxed{}` answer from the response
+3. Grade against ground truth using `grade_answer()` (handles numeric equivalence, fractions, etc.)
+4. Keep only correct traces
 
-### Phase 2: Supervised Fine-Tuning (Cold Start)
+**Trace format:** Standard chat format with the teacher's reasoning as the assistant response. Median trace length: ~2,300 characters.
 
-Fine-tune Qwen3-4B-Instruct on the filtered reasoning traces.
+```bash
+# Generate OlympiadBench traces
+python scripts/1_generate_traces.py --dataset olympiadbench
 
-**Training configuration:**
-```yaml
-model: Qwen/Qwen3-4B
-training:
-  learning_rate: 2e-5
-  lr_scheduler: cosine
-  warmup_ratio: 0.05
-  epochs: 3
-  batch_size: 4
-  gradient_accumulation_steps: 8   # effective batch = 32
-  max_seq_length: 2048
-  bf16: true
-
-loss:
-  mask: system + user tokens masked, train on assistant tokens only
-
-optimizer:
-  type: AdamW
-  weight_decay: 0.01
-
-saving:
-  strategy: epoch
-  eval_steps: 100
+# Generate MATH Level 4-5 traces
+python scripts/1_generate_traces.py --dataset math_hard
 ```
 
-**Framework:** Tinker API (LoRA fine-tuning via `forward_backward()` + `optim_step()`)
+### Phase 2: Supervised Fine-Tuning (SFT)
 
-**Expected outcome:** Measurable improvement on GSM8K over base model, establishing a strong starting point for RL.
+Fine-tune Qwen3-4B-Instruct on the distilled traces using LoRA via Tinker.
+
+**Configuration:**
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| LoRA rank | 64 | |
+| Learning rate | 2e-4 | From `get_lr()` recommendation (~5e-4), tuned down |
+| Batch size | 32 | 119 steps/epoch with 3,825 traces |
+| Epochs | 2 | |
+| Max sequence length | 4096 | |
+| Optimizer | Adam (β1=0.9, β2=0.95) | Linear LR decay to 0 |
+| Loss masking | Assistant tokens only | |
+
+**Data:** 3,825 combined traces (390 OlympiadBench + 3,435 MATH hard)
+
+```bash
+python scripts/2_sft_train.py --data data/traces_custom_all.jsonl --log-path /tmp/tinker-math/sft_custom_A
+```
 
 ### Phase 3: Reinforcement Learning (GRPO)
 
-Apply Group Relative Policy Optimization to push beyond SFT ceiling.
+Apply Group Relative Policy Optimization with binary math correctness reward. The model generates multiple completions per problem, and those that solve correctly receive positive advantage while incorrect ones receive negative advantage.
 
-**Why GRPO:**
-- No separate value model needed (saves VRAM on 1x H100)
-- Groups multiple completions and uses relative ranking
-- Well-suited for verifiable rewards (math)
-- Same algorithm used by DeepSeek-R1, II-Search, and other recent work
+**GRPO v1 (Direct RL):**
+| Parameter | Value |
+|-----------|-------|
+| Training data | Full MATH train (~7.5k problems, all levels) |
+| LoRA rank | 64 |
+| Learning rate | 4e-5 |
+| Batch size | 128 |
+| Group size (K) | 16 |
+| Max tokens | 2048 |
+| Loss function | Importance sampling |
+| Epochs | ~1 (58 batches) |
+
+```bash
+python scripts/3_grpo_train.py --no-sft --dataset math
+```
+
+**GRPO v2 (Hard Problems — Best Model):**
+| Parameter | Value | Change from v1 |
+|-----------|-------|-----------------|
+| Training data | MATH Level 4-5 only (3,994 problems) | Filtered to hard problems |
+| Batch size | 64 | Smaller for more gradient steps |
+| Max tokens | 4096 | 2x longer context |
+| Epochs | 2 (124 batches) | More training |
+| Other params | Same as v1 | |
+
+**GRPO v3 (Continued Training):**
+- Resumed from v2 checkpoint
+- Learning rate reduced to 2e-5 (half of v2)
+- 2 additional epochs on MATH Level 4-5
+- Marginal improvement (+0.4pp MATH-500)
 
 **Reward function:**
 ```python
-def math_reward(response: str, ground_truth: str) -> float:
-    """
-    Simple verifiable reward for math.
-    """
-    extracted = extract_final_answer(response)  # parse number from response
-
-    if extracted is None:
-        return -1.0    # failed to produce a parseable answer (format penalty)
-
-    if is_equivalent(extracted, ground_truth):
-        return 1.0     # correct answer
-
-    return 0.0         # wrong answer, valid format
+def get_reward_math(response: str, ground_truth: str) -> float:
+    """Binary reward: 1.0 if correct, 0.0 otherwise."""
+    try:
+        given_answer = extract_boxed(response)
+        return 1.0 if grade_answer(given_answer, ground_truth) else 0.0
+    except ValueError:
+        return 0.0
 ```
 
-**GRPO configuration:**
-```yaml
-grpo:
-  group_size: 8                # K completions per prompt
-  learning_rate: 5e-6
-  kl_coef: 0.05               # KL penalty against reference model
-  max_new_tokens: 2048
-  temperature: 0.7             # for generation during rollouts
-  num_train_epochs: 2
-  batch_size: 2
-  gradient_accumulation_steps: 8
-
-  # Reference model: the SFT checkpoint (frozen)
-  ref_model: sft_checkpoint
-
-  # Training data: GSM8K train (fresh problems, not seen traces)
-  dataset: gsm8k_train
-```
-
-**Framework:** Tinker API (GRPO-style RL via `sample()` + `forward_backward()` with importance sampling loss)
-
-**Key considerations:**
-- VRAM budget: policy model (~8GB) + reference model (~8GB) + generation overhead (~16GB) + optimizer states (~16GB) ≈ ~48-50GB. Fits on H100 80GB.
-- If tight, use LoRA for the policy model and load reference model in 8-bit.
-- Monitor reward curves and KL divergence — if KL spikes, reduce learning rate.
+**GRPO advantage computation:**
+For each problem, generate K=16 completions. The advantage for each completion is: `reward_i - mean(rewards)`. If all completions are correct or all wrong (zero variance), the problem is skipped.
 
 ### Phase 4: Evaluation
 
-**Benchmarks:**
+Unified evaluation across 5 benchmarks with consistent protocol.
+
 | Benchmark | Size | Difficulty | Purpose |
 |-----------|------|-----------|---------|
-| GSM8K test | 1,319 | Grade school math | In-distribution performance |
-| MATH-500 | 500 | Competition math | Out-of-distribution generalization |
+| **MATH-500** | 500 | Competition math | Primary metric, broad difficulty |
+| **AIME 2024** | 30 | Very hard (competition) | Ceiling test |
+| **AIME 2025** | 30 | Very hard (competition) | Ceiling test, temporal OOD |
+| **GSM8K** | 1,319 | Grade school | Floor test, regression check |
+| **OlympiadBench** | 572 (numerical only) | Olympiad-level | Hard benchmark, training overlap check |
 
-**Evaluation protocol:**
-- Greedy decoding (temperature=0) for deterministic results
-- Extract numerical answer using regex
-- Compare against ground truth with numerical equivalence (handle float precision, fraction notation)
-- Report accuracy (% correct) with 95% confidence intervals
+**Protocol:**
+- Temperature: 0.01 (near-deterministic)
+- Max tokens: 2048 (eval)
+- Few-shot prefix from `MathEnv.standard_fewshot_prefix()`
+- Answer extraction: parse `\boxed{}` from response
+- Grading: `grade_answer()` handles numeric equivalence, fractions, simplified forms
+- Confidence intervals: 95% CI using normal approximation
 
-**Ablation study:**
+```bash
+python scripts/4_eval.py --experiments baseline,sft_custom,direct_rl,sft_then_rl
+```
 
-| Experiment | Purpose |
-|-----------|---------|
-| Base Qwen3-4B | Baseline (no post-training) |
-| SFT (custom traces) | Measures teacher-distilled data contribution |
-| SFT (public data) | Public data baseline for comparison |
-| SFT + GRPO (custom) | Full pipeline |
-| Direct GRPO (no SFT) | Tests whether cold start SFT is necessary |
+---
 
-This ablation addresses multiple questions: (1) Is SFT cold-start necessary before RL? (2) Does custom teacher-distilled data outperform public data? (3) How much does each stage contribute?
+## What Works
+
+1. **GRPO on hard problems with long context.** The single most impactful change. Training exclusively on MATH Level 4-5 problems with max_tokens=4096 produced the best model across all benchmarks.
+
+2. **Binary correctness reward.** Simple 0/1 reward is sufficient — no need for format penalties, partial credit, or reward shaping. The GRPO advantage computation naturally handles the rest.
+
+3. **Direct RL (no SFT warm-start).** Starting RL directly from the base model works just as well as SFT→RL, simplifying the pipeline.
+
+4. **Teacher distillation for data quality.** Qwen3-235B produces high-quality traces with ~86% yield on hard problems. The traces are naturally compatible with the student model's tokenizer and style.
+
+## What Doesn't Work
+
+1. **SFT on small (4B) models.** Despite careful hyperparameter tuning and data curation, LoRA SFT consistently degraded performance vs baseline (-2.2pp on MATH-500). The model appears to overfit to the trace distribution rather than learning generalizable reasoning.
+
+2. **OpenR1-Math-220k as SFT data.** DeepSeek R1-style traces (median 7,300 chars) are incompatible with Qwen3-4B. Even length-filtered subsets caused catastrophic regression. The reasoning style mismatch between DeepSeek R1 and Qwen3 appears fundamental.
+
+3. **SFT warm-start for RL.** SFT→RL converges to the same accuracy as direct RL (85.4% vs 85.2%), providing no benefit while adding training time and complexity.
+
+4. **Training on easy problems.** GRPO v1 on all MATH levels (including Level 1-3) underperforms v2 on hard problems only. Easy problems contribute near-zero signal (all completions correct → zero advantage).
+
+5. **Extended training at low LR.** GRPO v3 (2 more epochs at half LR) adds only +0.4pp over v2, suggesting the model is near its single-sample ceiling at this scale.
+
+---
+
+## SFT Experiments Detail
+
+We tried multiple SFT configurations before concluding that SFT hurts this model:
+
+| SFT Version | Data | LR | Epochs | Steps | MATH-500 | Notes |
+|---|---|---|---|---|---|---|
+| v1 | 390 OlympiadBench | 2e-5 | 3 | 9 | ~79% | LR too low, too few steps |
+| v2 | 390 OlympiadBench | 5e-4 | 3 | 36 | ~79% | Fixed LR, still insufficient data |
+| v3 | 5.4k (custom + OpenR1) | 5e-4 | 2 | 168 | ~70% | OpenR1 data caused catastrophic regression |
+| v4 | 861 (custom short) | 5e-4 | 2 | 53 | ~77% | Removed OpenR1, improved but still below baseline |
+| Config A | 3,825 (full custom) | 2e-4 | 2 | 238 | 77.2% | Best SFT, but still -2.2pp vs baseline |
+| Config B | 3,825 (full custom) | 5e-4 | 1 | 119 | 76.8% | Higher LR, 1 epoch |
+
+**Lesson:** For a 4B model that already has strong math capability, SFT on distilled traces doesn't help — the model learns to mimic the trace format but loses some of its inherent reasoning ability.
 
 ---
 
@@ -202,133 +216,106 @@ This ablation addresses multiple questions: (1) Is SFT cold-start necessary befo
 
 ```
 howard/
-├── README.md                    # This file
-├── requirements.txt             # Python dependencies
+├── README.md                      # This file
+├── requirements.txt               # Python dependencies
 ├── .gitignore
 ├── configs/
-│   ├── sft_config.yaml          # SFT hyperparameters
-│   └── grpo_config.yaml         # GRPO hyperparameters
+│   ├── sft_config.yaml            # SFT hyperparameters
+│   └── grpo_config.yaml           # GRPO hyperparameters
 ├── scripts/
-│   ├── 0_baseline_eval.py       # Evaluate base model on GSM8K + MATH-500
-│   ├── 1_generate_traces.py     # Teacher distillation (Qwen3-235B → traces)
-│   ├── 2_sft_train.py           # SFT training via Tinker
-│   ├── 3_grpo_train.py          # GRPO training via Tinker
-│   ├── 4_eval.py                # Unified evaluation + ablation table
+│   ├── 0_baseline_eval.py         # Evaluate base model
+│   ├── 1_generate_traces.py       # Teacher distillation (Qwen3-235B → traces)
+│   ├── 2_sft_train.py             # SFT training via Tinker
+│   ├── 3_grpo_train.py            # GRPO training via Tinker
+│   ├── 4_eval.py                  # Unified evaluation & ablation table
+│   ├── 5_prepare_openr1.py        # Download & filter OpenR1-Math-220k
+│   ├── 6_combine_data.py          # Merge multiple trace JSONL files
 │   └── utils/
-│       ├── answer_extraction.py # Parse numerical answers from responses
-│       ├── reward.py            # Reward function + GRPO advantage computation
-│       ├── data.py              # Data loading, formatting, public data loading
-│       └── tinker_helpers.py    # Tinker client setup, datum builders
-├── data/                        # Generated traces (gitignored)
-├── results/
-│   ├── baseline/                # Base model eval results
-│   ├── sft_custom/              # SFT on custom data results
-│   ├── sft_public/              # SFT on public data results
-│   ├── grpo/                    # GRPO model eval results
-│   └── ablation/                # Full ablation comparison
-└── report.md                    # Final writeup with analysis
+│       ├── data.py                # Data loaders (GSM8K, MATH, AIME, OlympiadBench)
+│       └── tinker_helpers.py      # Tinker client setup, model constants
+├── data/                          # Generated traces (gitignored)
+│   ├── traces_olympiadbench.jsonl # 390 traces from OlympiadBench
+│   ├── traces_math_hard.jsonl     # 3,435 traces from MATH Level 4-5
+│   ├── traces_custom_all.jsonl    # 3,825 combined traces
+│   └── openr1_filtered.jsonl      # 5,000 filtered OpenR1 traces (not used)
+└── results/
+    └── ablation/
+        └── ablation_results.json  # Full evaluation results
 ```
 
 ---
 
-## Timeline
+## Checkpoints
 
-| Day | Focus | Deliverable |
-|-----|-------|-------------|
-| **Day 1** | Baseline eval, trace generation, SFT training | SFT checkpoint, baseline numbers |
-| **Day 2** | GRPO setup, training, initial eval | GRPO checkpoint, preliminary results |
-| **Day 3** | Ablation (direct RL), full eval suite, analysis | All experiment results |
-| **Day 4** | Writeup, polish, reruns if needed | Final report with analysis |
+All checkpoints are stored at `/tmp/tinker-math/` on the training machine:
 
----
-
-## Expected Results
-
-Based on published numbers for Qwen3-4B and the effectiveness of SFT + GRPO on math:
-
-| Model | GSM8K (acc) | MATH-500 (acc) |
-|-------|------------|----------------|
-| Qwen3-4B-Instruct (baseline) | ~85-90% | ~55-65% |
-| + SFT on GSM8K traces | ~90-93% | ~58-68% |
-| + GRPO | ~92-95% | ~62-72% |
-
-The biggest expected lift is on MATH-500 (OOD generalization), where RL teaches the model to explore and self-correct rather than follow memorized patterns.
+| Checkpoint | Description | Best For |
+|---|---|---|
+| `sft_custom_A` | SFT Config A (LR=2e-4, 2 epochs, 3,825 traces) | SFT baseline comparison |
+| `direct_rl` | GRPO v1 (all MATH, 58 batches, 2048 tokens) | Basic RL baseline |
+| `sft_then_rl` | GRPO from SFT-A checkpoint | SFT→RL comparison |
+| `grpo_v2` | GRPO v2 (MATH Level 4-5, 124 batches, 4096 tokens) | **Best for AIME 2024 (43.3%)** |
+| `grpo_v3` | Continued from v2, LR=2e-5, 2 more epochs | **Best for MATH-500 (90.6%)** |
 
 ---
-
-## Discussion: From Math to Tool Use
-
-### What transfers directly
-
-The pipeline demonstrated here maps 1:1 to tool-use post-training:
-
-| Math Pipeline | Tool Use Equivalent |
-|--------------|-------------------|
-| GSM8K problems | User queries requiring tool calls |
-| Self-generated reasoning traces | Teacher-generated tool-use traces |
-| SFT on traces | SFT on tool-call conversations |
-| Math correctness reward | Tool execution success reward |
-| GRPO | GRPO (same algorithm) |
-
-### What changes for tool use
-
-1. **Action space:** Instead of free-form text, the model generates structured tool calls (JSON). Constrained decoding may be needed.
-2. **Multi-turn:** Tool use is inherently multi-turn (call → result → reason → call again). Math is typically single-turn.
-3. **Reward complexity:** Tool use may need composite rewards (format correctness + task completion + efficiency), while math is binary.
-4. **Environment:** Tool use RL needs a live execution environment. Math needs only answer comparison.
-
-### What changes for ternary models
-
-When applying this pipeline to DeepGrove's ternary models:
-
-1. **SFT with STE:** Replace standard gradient descent with straight-through estimator. Weights stay ternary throughout.
-2. **Higher learning rate:** Microsoft's BitNet findings suggest 2-5x higher LR for ternary SFT.
-3. **Loss summation:** Use `reduction='sum'` instead of `reduction='mean'` for better convergence.
-4. **More epochs:** Expect 2-3x more epochs due to STE gradient noise.
-5. **Scale & norm tuning:** After SFT+RL, a final phase tuning only the continuous parameters (per-channel scales, LayerNorm) can provide cheap additional gains.
-6. **GRPO considerations:** RL gradients are already high-variance; STE adds more noise. Larger group sizes (K=16+) and gradient clipping are recommended. Alternative: rejection sampling + SFT as a more stable substitute for online RL.
-
----
-
-## Dependencies
-
-```
-tinker-api>=0.1.0     # Tinker training API
-datasets              # HuggingFace datasets
-numpy>=1.24.0
-pyyaml>=6.0
-tqdm>=4.65.0
-sympy>=1.12           # Math answer grading
-scipy>=1.11.0         # Confidence intervals
-```
-
-## Hardware Requirements
-
-- **Minimum:** 1x NVIDIA H100 80GB
-- **Training:** All via Tinker (cloud API, LoRA) — local GPU used for data processing only
-- Tinker handles distributed training, VRAM management, and model serving
 
 ## Reproducing Results
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
+### Prerequisites
 
+```bash
+pip install -r requirements.txt
+export TINKER_API_KEY="your-api-key"
+```
+
+### Full Pipeline
+
+```bash
 # Step 0: Baseline evaluation
 python scripts/0_baseline_eval.py
 
-# Step 1: Generate teacher-distilled traces (Qwen3-235B → GSM8K)
-python scripts/1_generate_traces.py --num-samples 4 --output data/traces_custom.jsonl
+# Step 1: Generate teacher-distilled traces
+python scripts/1_generate_traces.py --dataset olympiadbench
+python scripts/1_generate_traces.py --dataset math_hard
 
-# Step 2: SFT on custom traces
-python scripts/2_sft_train.py --config configs/sft_config.yaml --data data/traces_custom.jsonl
+# Step 2: SFT (optional — doesn't improve results)
+python scripts/2_sft_train.py --data data/traces_custom_all.jsonl \
+    --log-path /tmp/tinker-math/sft_custom_A
 
-# Step 3: GRPO (from SFT checkpoint)
-python scripts/3_grpo_train.py --config configs/grpo_config.yaml
+# Step 3: GRPO (Direct RL — recommended path)
+# v1: All MATH problems
+python scripts/3_grpo_train.py --no-sft --dataset math
 
-# Step 3b: Direct RL ablation (no SFT)
-python scripts/3_grpo_train.py --no-sft --checkpoint-dir checkpoints/direct_rl
+# v2: Hard problems only (best results) — requires custom script
+# See /tmp/run_grpo_v2.py for the enhanced training loop
 
-# Step 4: Unified evaluation & ablation table
-python scripts/4_eval.py --checkpoints baseline,sft_custom,sft_public,grpo,direct_rl
+# Step 4: Evaluation
+python scripts/4_eval.py --experiments baseline,sft_custom,direct_rl \
+    --benchmarks math500,aime2024,aime2025,gsm8k,olympiadbench
 ```
+
+### Evaluation Only
+
+To evaluate a specific checkpoint:
+
+```bash
+# Evaluate all experiments
+python scripts/4_eval.py
+
+# Evaluate specific experiments
+python scripts/4_eval.py --experiments baseline,direct_rl --benchmarks math500,aime2024
+```
+
+---
+
+## Future Directions
+
+1. **Majority voting (maj@k):** Sample N completions and take the majority answer. Expected to push MATH-500 toward 95%+ based on the model's per-problem success rate.
+
+2. **Reward shaping:** Add format compliance bonus, partial credit for intermediate steps, or length penalty to encourage concise solutions.
+
+3. **Curriculum learning:** Start RL on Level 3-4, then gradually introduce Level 5 problems as the model improves.
+
+4. **Larger LoRA rank or full fine-tuning:** Rank 64 may be a capacity bottleneck for the hardest problems.
+
+5. **Multi-epoch cycling on hard problems:** GRPO v2's success suggests the model benefits from repeated exposure to hard problems. Cycling with different random seeds could extract more signal.

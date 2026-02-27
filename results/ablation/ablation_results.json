@@ -1,18 +1,18 @@
 {
   "baseline": {
     "math500": {
-      "correct": 398,
+      "correct": 397,
       "total": 500,
-      "accuracy": 0.796,
-      "accuracy_pct": "79.6%",
+      "accuracy": 0.794,
+      "accuracy_pct": "79.4%",
       "ci_95": "+/-3.5%"
     },
     "aime2024": {
-      "correct": 4,
+      "correct": 6,
       "total": 30,
-      "accuracy": 0.13333333333333333,
-      "accuracy_pct": "13.3%",
-      "ci_95": "+/-12.2%"
+      "accuracy": 0.2,
+      "accuracy_pct": "20.0%",
+      "ci_95": "+/-14.3%"
     },
     "aime2025": {
       "correct": 6,
@@ -20,15 +20,66 @@
       "accuracy": 0.2,
       "accuracy_pct": "20.0%",
       "ci_95": "+/-14.3%"
+    },
+    "gsm8k": {
+      "correct": 1241,
+      "total": 1319,
+      "accuracy": 0.9408642911296436,
+      "accuracy_pct": "94.1%",
+      "ci_95": "+/-1.3%"
+    },
+    "olympiadbench": {
+      "correct": 280,
+      "total": 572,
+      "accuracy": 0.48951048951048953,
+      "accuracy_pct": "49.0%",
+      "ci_95": "+/-4.1%"
+    }
+  },
+  "sft_custom": {
+    "math500": {
+      "correct": 386,
+      "total": 500,
+      "accuracy": 0.772,
+      "accuracy_pct": "77.2%",
+      "ci_95": "+/-3.7%"
+    },
+    "aime2024": {
+      "correct": 3,
+      "total": 30,
+      "accuracy": 0.1,
+      "accuracy_pct": "10.0%",
+      "ci_95": "+/-10.7%"
+    },
+    "aime2025": {
+      "correct": 5,
+      "total": 30,
+      "accuracy": 0.16666666666666666,
+      "accuracy_pct": "16.7%",
+      "ci_95": "+/-13.3%"
+    },
+    "gsm8k": {
+      "correct": 1229,
+      "total": 1319,
+      "accuracy": 0.9317664897649734,
+      "accuracy_pct": "93.2%",
+      "ci_95": "+/-1.4%"
+    },
+    "olympiadbench": {
+      "correct": 277,
+      "total": 572,
+      "accuracy": 0.48426573426573427,
+      "accuracy_pct": "48.4%",
+      "ci_95": "+/-4.1%"
     }
   },
   "direct_rl": {
     "math500": {
-      "correct": 421,
+      "correct": 426,
       "total": 500,
-      "accuracy": 0.842,
-      "accuracy_pct": "84.2%",
-      "ci_95": "+/-3.2%"
+      "accuracy": 0.852,
+      "accuracy_pct": "85.2%",
+      "ci_95": "+/-3.1%"
     },
     "aime2024": {
       "correct": 9,
@@ -38,11 +89,99 @@
       "ci_95": "+/-16.4%"
     },
     "aime2025": {
+      "correct": 8,
+      "total": 30,
+      "accuracy": 0.26666666666666666,
+      "accuracy_pct": "26.7%",
+      "ci_95": "+/-15.8%"
+    },
+    "gsm8k": {
+      "correct": 1233,
+      "total": 1319,
+      "accuracy": 0.9347990902198635,
+      "accuracy_pct": "93.5%",
+      "ci_95": "+/-1.3%"
+    },
+    "olympiadbench": {
+      "correct": 319,
+      "total": 572,
+      "accuracy": 0.5576923076923077,
+      "accuracy_pct": "55.8%",
+      "ci_95": "+/-4.1%"
+    }
+  },
+  "sft_then_rl": {
+    "math500": {
+      "correct": 427,
+      "total": 500,
+      "accuracy": 0.854,
+      "accuracy_pct": "85.4%",
+      "ci_95": "+/-3.1%"
+    },
+    "aime2024": {
       "correct": 7,
       "total": 30,
       "accuracy": 0.23333333333333334,
       "accuracy_pct": "23.3%",
       "ci_95": "+/-15.1%"
+    },
+    "aime2025": {
+      "correct": 6,
+      "total": 30,
+      "accuracy": 0.2,
+      "accuracy_pct": "20.0%",
+      "ci_95": "+/-14.3%"
+    },
+    "gsm8k": {
+      "correct": 1232,
+      "total": 1319,
+      "accuracy": 0.934040940106141,
+      "accuracy_pct": "93.4%",
+      "ci_95": "+/-1.3%"
+    },
+    "olympiadbench": {
+      "correct": 310,
+      "total": 572,
+      "accuracy": 0.541958041958042,
+      "accuracy_pct": "54.2%",
+      "ci_95": "+/-4.1%"
+    }
+  },
+  "grpo_v2": {
+    "math500": {
+      "correct": 451,
+      "total": 500,
+      "accuracy": 0.902,
+      "accuracy_pct": "90.2%",
+      "ci_95": "+/-2.6%"
+    },
+    "aime2024": {
+      "correct": 13,
+      "total": 30,
+      "accuracy": 0.43333333333333335,
+      "accuracy_pct": "43.3%",
+      "ci_95": "+/-17.7%"
+    },
+    "aime2025": {
+      "correct": 8,
+      "total": 30,
+      "accuracy": 0.26666666666666666,
+      "accuracy_pct": "26.7%",
+      "ci_95": "+/-15.8%"
+    },
+    "gsm8k": {
+      "correct": 1237,
+      "total": 1319,
+      "accuracy": 0.9378316906747536,
+      "accuracy_pct": "93.8%",
+      "ci_95": "+/-1.3%"
+    },
+    "olympiadbench": {
+      "correct": 364,
+      "total": 572,
+      "accuracy": 0.6363636363636364,
+      "accuracy_pct": "63.6%",
+      "ci_95": "+/-3.9%"
     }
   }
 }

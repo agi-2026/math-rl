@@ -38,9 +38,9 @@ logging.getLogger("httpx").setLevel(logging.WARN)
 DEFAULT_CONFIG = {
     "model_name": STUDENT_MODEL,
     "lora_rank": 64,
-    "learning_rate": 2e-5,
+    "learning_rate": 5e-4,
     "num_epochs": 3,
-    "batch_size": 128,
+    "batch_size": 32,
     "max_length": 4096,
     "save_every": 20,
     "train_on_what": "all_assistant_messages",

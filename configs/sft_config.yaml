@@ -5,11 +5,12 @@ model_name: Qwen/Qwen3-4B-Instruct-2507
 lora_rank: 64
 
 # Optimizer (linear decay from this LR to 0)
-learning_rate: 2.0e-5
+# 5e-4 is the recommended LoRA LR for Qwen3-4B per get_lr()
+learning_rate: 5.0e-4
 
 # Training
 num_epochs: 3
-batch_size: 128         # datums per forward_backward call
+batch_size: 32          # smaller batches = more gradient steps per epoch
 max_length: 4096        # max sequence length (truncate longer)
 train_on_what: all_assistant_messages
 

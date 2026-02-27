@@ -51,6 +51,29 @@ def load_aime_2025() -> datasets.Dataset:
     return cast(datasets.Dataset, ds)
 
 
+def load_olympiadbench() -> datasets.Dataset:
+    """Load OlympiadBench (674 olympiad-level math problems).
+
+    Fields: question, solution (list[str]), final_answer (list[str]),
+            answer_type, subfield, is_multiple_answer.
+    Answer types: Numerical (572), Expression (63), Tuple (33), Interval (6).
+    """
+    ds = datasets.load_dataset("math-ai/olympiadbench", split="test")
+    return cast(datasets.Dataset, ds)
+
+
+def load_math_train_hard() -> datasets.Dataset:
+    """Load MATH training set filtered to Level 4-5 (3,994 problems).
+
+    These are competition-level problems suitable for teacher distillation.
+    Fields: problem, level, type, solution.
+    Answers are in \\boxed{} format within the solution field.
+    """
+    full = load_math_train()
+    hard = full.filter(lambda row: row["level"] in ("Level 4", "Level 5"))
+    return cast(datasets.Dataset, hard)
+
+
 def load_math_train() -> datasets.Dataset:
     """Load full MATH training set (all subjects, ~7.5k problems).
 
