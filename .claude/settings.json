@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/root/howard/.venv/bin/python -c \"from tinker_cookbook.recipes.math_rl.math_grading import extract_boxed, grade_answer; print\\(''Math grading functions available''\\)\")",
+      "Bash(/root/howard/.venv/bin/python:*)",
+      "Bash(/root/howard/.venv/bin/pip show torch transformers peft bitsandbytes vllm accelerate)",
+      "Bash(nvidia-smi --query-gpu=name,memory.total,memory.free,compute_cap --format=csv)",
+      "Bash(/root/howard/.venv/bin/pip install trl accelerate peft vllm)",
+      "Bash(/root/howard/.venv/bin/pip install \"vllm==0.12.0\")",
+      "Bash(nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader)",
+      "Bash(nvidia-smi --query-gpu=memory.used,memory.total,memory.free --format=csv,noheader)",
+      "Bash(find /tmp -name \"*eval.json\" -newer /tmp/claude-0 -exec cat {} ;)"
+    ]
+  }
+}

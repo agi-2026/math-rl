@@ -4,7 +4,7 @@
 
 This project demonstrates a complete post-training pipeline for improving mathematical reasoning in a 4B-parameter language model. Starting from Qwen3-4B-Instruct, we explore supervised fine-tuning (SFT) via teacher distillation and reinforcement learning (GRPO) to push math performance significantly beyond the base model.
 
-**Key result:** GRPO on hard math problems achieves **90.2% on MATH-500** (vs 79.4% baseline) and **43.3% on AIME 2024** (vs 20.0% baseline) — a +10.8pp and +23.3pp improvement respectively.
+**Key result:** GRPO on hard math problems achieves **90.2% on MATH-500** (vs 79.4% baseline) and **43.3% on AIME 2024** (vs 20.0% baseline) — a +10.8pp and +23.3pp improvement respectively. With majority voting (maj@16), performance reaches **93.2% on MATH-500** and **56.7% on AIME 2024**.
 
 | Component | Details |
 |-----------|---------|
@@ -30,6 +30,7 @@ All models evaluated with temperature=0.01, greedy-ish decoding, and 95% confide
 | **SFT → RL** | 85.4% ±3.1 | 23.3% ±15.1 | 20.0% ±14.3 | 93.4% ±1.3 | 54.2% ±4.1 |
 | **GRPO v2** (hard problems) | **90.2% ±2.6** | **43.3% ±17.7** | 26.7% ±15.8 | 93.8% ±1.3 | **63.6% ±3.9** |
 | **GRPO v3** (continued) | 90.6% ±2.6 | 36.7% ±17.2 | **30.0% ±16.4** | **94.0% ±1.3** | 64.0% ±3.9 |
+| **GRPO local** (full-param, H100) | 87.8% ±2.9 | 26.7% ±15.8 | 26.7% ±15.8 | 94.4% ±1.2 | 58.9% ±4.0 |
 
 ### Key Takeaways
 
@@ -145,6 +146,50 @@ def get_reward_math(response: str, ground_truth: str) -> float:
 **GRPO advantage computation:**
 For each problem, generate K=16 completions. The advantage for each completion is: `reward_i - mean(rewards)`. If all completions are correct or all wrong (zero variance), the problem is skipped.
 
+### Phase 7: Local Full-Parameter GRPO
+
+To test whether removing the LoRA bottleneck improves results, we ran full-parameter GRPO training locally on an H100 80GB GPU using TRL's GRPOTrainer with vLLM for generation.
+
+**Configuration:**
+| Parameter | Value | vs GRPO v2 (LoRA) |
+|-----------|-------|--------------------|
+| Method | Full-parameter (all 4B params) | LoRA rank=64 |
+| Framework | TRL GRPOTrainer + vLLM colocate | Tinker API |
+| Learning rate | 5e-6 | 4e-5 |
+| Batch size | 8 × 8 grad accum = 64 effective | 64 |
+| Group size (K) | 8 | 16 |
+| Max completion tokens | 2048 | 4096 |
+| Training data | MATH Level 4-5 (3,994 problems) | Same |
+| Epochs | 2 | 2 |
+| Training time | ~13 hours (H100 80GB) | ~2 hours (Tinker cloud) |
+| GPU memory peak | 68 GB / 81 GB | N/A (cloud) |
+
+**Results vs LoRA:**
+| Benchmark | GRPO v2 (LoRA) | GRPO local (full-param) | Delta |
+|---|---|---|---|
+| MATH-500 | **90.2%** | 87.8% | -2.4pp |
+| AIME 2024 | **43.3%** | 26.7% | -16.6pp |
+| AIME 2025 | 26.7% | 26.7% | 0 |
+| GSM8K | 93.8% | **94.4%** | +0.6pp |
+| OlympiadBench | **63.6%** | 58.9% | -4.7pp |
+
+**Analysis:** The full-parameter model improved over baseline but significantly underperformed the LoRA model. The likely cause is **not** LoRA vs full-param itself, but the hyperparameter compromises needed to fit full-param training on a single GPU:
+- **Shorter context (2048 vs 4096):** Hard competition problems often require long chains of reasoning. Truncating at 2048 tokens cuts off solutions mid-reasoning.
+- **Smaller group size (8 vs 16):** Fewer samples per problem means less reward signal diversity, leading to noisier advantage estimates.
+- **Lower learning rate (5e-6 vs 4e-5):** Full-param training is more sensitive to large updates, requiring a lower LR that slows convergence.
+
+**Key takeaway:** When compute is constrained to a single GPU, LoRA with optimal hyperparameters (long context, large group size) outperforms full-parameter training with compromised hyperparameters. Full-param GRPO would likely need multi-GPU training to match the context length and group size of the LoRA setup.
+
+```bash
+# Training
+python scripts/7_grpo_local.py --num-epochs 2 --batch-size 8 --grad-accum 8 \
+    --num-generations 8 --max-completion-length 2048 --save-steps 50
+
+# Evaluation (uses vLLM for fast inference)
+python scripts/8_eval_local.py --checkpoint /tmp/tinker-math/grpo_local_fullparam/final \
+    --benchmarks math500,aime2024,aime2025,gsm8k,olympiadbench
+```
+
 ### Phase 4: Evaluation
 
 Unified evaluation across 5 benchmarks with consistent protocol.
@@ -193,6 +238,10 @@ python scripts/4_eval.py --experiments baseline,sft_custom,direct_rl,sft_then_rl
 
 5. **Extended training at low LR.** GRPO v3 (2 more epochs at half LR) adds only +0.4pp over v2, suggesting the model is near its single-sample ceiling at this scale.
 
+6. **Full-parameter training with constrained hyperparameters.** Local full-param GRPO on H100 (87.8% MATH-500) underperformed LoRA GRPO v2 (90.2%). Memory constraints forced shorter completions (2048 vs 4096 tokens) and smaller group size (8 vs 16), which matter more than the LoRA bottleneck.
+
+6. **LoRA with right hyperparameters beats naive full-parameter training.** Local full-param GRPO on H100 (87.8% MATH-500) underperforms Tinker LoRA GRPO v2 (90.2%), likely due to reduced max_completion_length (2048 vs 4096) and smaller group_size (8 vs 16) needed to fit in GPU memory. See [Phase 7](#phase-7-local-full-parameter-grpo) for details.
+
 ---
 
 ## SFT Experiments Detail
@@ -230,6 +279,8 @@ howard/
 │   ├── 4_eval.py                  # Unified evaluation & ablation table
 │   ├── 5_prepare_openr1.py        # Download & filter OpenR1-Math-220k
 │   ├── 6_combine_data.py          # Merge multiple trace JSONL files
+│   ├── 7_grpo_local.py            # Local full-param GRPO (TRL + vLLM on H100)
+│   ├── 8_eval_local.py            # Evaluate local HF checkpoints (vLLM)
 │   └── utils/
 │       ├── data.py                # Data loaders (GSM8K, MATH, AIME, OlympiadBench)
 │       └── tinker_helpers.py      # Tinker client setup, model constants
@@ -256,6 +307,7 @@ All checkpoints are stored at `/tmp/tinker-math/` on the training machine:
 | `sft_then_rl` | GRPO from SFT-A checkpoint | SFT→RL comparison |
 | `grpo_v2` | GRPO v2 (MATH Level 4-5, 124 batches, 4096 tokens) | **Best for AIME 2024 (43.3%)** |
 | `grpo_v3` | Continued from v2, LR=2e-5, 2 more epochs | **Best for MATH-500 (90.6%)** |
+| `grpo_local_fullparam/final` | Full-param GRPO via TRL on H100, 2 epochs, 13h | LoRA vs full-param comparison |
 
 ---
 
@@ -294,6 +346,21 @@ python scripts/4_eval.py --experiments baseline,sft_custom,direct_rl \
     --benchmarks math500,aime2024,aime2025,gsm8k,olympiadbench
 ```
 
+### Local Full-Parameter GRPO (H100)
+
+```bash
+# Install additional dependencies
+pip install trl accelerate peft "vllm==0.12.0"
+
+# Train (requires H100 80GB or equivalent)
+python scripts/7_grpo_local.py --num-epochs 2 --batch-size 8 --grad-accum 8 \
+    --num-generations 8 --max-completion-length 2048 --save-steps 50
+
+# Evaluate local checkpoint
+python scripts/8_eval_local.py --checkpoint /tmp/tinker-math/grpo_local_fullparam/final \
+    --benchmarks math500,aime2024,aime2025,gsm8k,olympiadbench
+```
+
 ### Evaluation Only
 
 To evaluate a specific checkpoint:
@@ -308,14 +375,38 @@ python scripts/4_eval.py --experiments baseline,direct_rl --benchmarks math500,a
 
 ---
 
+## Inference-Time Scaling: Majority Voting
+
+After reaching the training-side ceiling, we apply majority voting (maj@k) at inference time: sample K completions at temperature=0.7 per problem, extract the `\boxed{}` answer from each, and take the most common answer (grouping mathematically equivalent answers via `grade_answer()`).
+
+### Majority Voting Results (GRPO v2)
+
+| Benchmark | Greedy (k=1) | maj@16 | maj@64 | pass@16 | pass@64 |
+|---|---|---|---|---|---|
+| **MATH-500** | 90.2% | **93.2%** | 93.2% | 95.6% | 97.2% |
+| **AIME 2024** | 43.3% | **56.7%** | 53.3% | 66.7% | 66.7% |
+| **AIME 2025** | 26.7% | **43.3%** | 40.0% | 53.3% | 53.3% |
+
+### Key Observations
+
+1. **maj@16 is the sweet spot.** It outperforms maj@64 on AIME benchmarks — more samples at high temperature introduce diverse wrong answers that can outvote the correct one.
+
+2. **MATH-500 plateaus at 93.2%** despite pass@64=97.2% (486/500 solvable). The remaining hard problems have success rates too low for majority voting to help.
+
+3. **AIME 2024 hits 56.7%** with maj@16, exceeding the 50% target. AIME 2025 reaches 43.3%.
+
+4. **pass@64 reveals the model's ceiling:** 97.2% on MATH-500 and 66.7% on AIME 2024. Closing the gap between pass@k and maj@k would require a learned verifier or reward-weighted voting rather than simple majority.
+
+---
+
 ## Future Directions
 
-1. **Majority voting (maj@k):** Sample N completions and take the majority answer. Expected to push MATH-500 toward 95%+ based on the model's per-problem success rate.
+1. **Reward-weighted voting / verifier:** Train a small verifier model to score completions, replacing simple majority vote. Could close the gap between maj@k (93.2%) and pass@k (97.2%) on MATH-500.
 
 2. **Reward shaping:** Add format compliance bonus, partial credit for intermediate steps, or length penalty to encourage concise solutions.
 
 3. **Curriculum learning:** Start RL on Level 3-4, then gradually introduce Level 5 problems as the model improves.
 
-4. **Larger LoRA rank or full fine-tuning:** Rank 64 may be a capacity bottleneck for the hardest problems.
+4. **Multi-GPU full-parameter GRPO:** Our single-GPU full-param experiment was bottlenecked by memory, forcing shorter context (2048 tokens) and smaller group size (8). Multi-GPU training could match the LoRA hyperparameters (4096 tokens, group=16) and potentially exceed LoRA results.
 
 5. **Multi-epoch cycling on hard problems:** GRPO v2's success suggests the model benefits from repeated exposure to hard problems. Cycling with different random seeds could extract more signal.
