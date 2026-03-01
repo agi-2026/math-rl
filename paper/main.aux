@@ -1,0 +1,142 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldcontentsline\contentsline
+\gdef\contentsline#1#2#3#4{\oldcontentsline{#1}{#2}{#3}}
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\contentsline\oldcontentsline
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{shao2024deepseekmath}
+\citation{mukherjee2023orca,yu2024metamath}
+\citation{hendrycks2021measuring}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\citation{hendrycks2021measuring}
+\citation{cobbe2021gsm8k}
+\citation{deepseek2025r1}
+\citation{qwq32b}
+\citation{shao2024deepseekmath}
+\citation{deepseek2025r1}
+\citation{vonwerra2022trl}
+\citation{lambert2024rlvr}
+\citation{hu2022lora}
+\citation{hinton2015distilling}
+\citation{yu2024metamath,mukherjee2023orca}
+\citation{wang2023selfconsistency}
+\citation{cobbe2021gsm8k}
+\citation{lightman2024lets}
+\citation{tinker2025}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Related Work}{2}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Mathematical Reasoning in LLMs.}{2}{section*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Reinforcement Learning for Reasoning.}{2}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Parameter-Efficient Fine-Tuning.}{2}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Teacher Distillation.}{2}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Inference-Time Scaling.}{2}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Experimental Setup}{2}{section.3}\protected@file@percent }
+\newlabel{sec:setup}{{3}{2}{Experimental Setup}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Models}{2}{subsection.3.1}\protected@file@percent }
+\citation{vonwerra2022trl}
+\citation{kwon2023vllm}
+\citation{hendrycks2021measuring}
+\citation{he2024olympiadbench}
+\citation{hu2022lora}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Training Frameworks}{3}{subsection.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Training Data}{3}{subsection.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Reward Function}{3}{subsection.3.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Evaluation Protocol}{3}{subsection.3.5}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Evaluation benchmarks.\relax }}{3}{table.caption.6}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:benchmarks}{{1}{3}{Evaluation benchmarks.\relax }{table.caption.6}{}}
+\citation{shao2024deepseekmath}
+\citation{deepseek2025r1}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Methodology}{4}{section.4}\protected@file@percent }
+\newlabel{sec:methodology}{{4}{4}{Methodology}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Supervised Fine-Tuning (SFT)}{4}{subsection.4.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces SFT hyperparameters.\relax }}{4}{table.caption.7}\protected@file@percent }
+\newlabel{tab:sft-config}{{2}{4}{SFT hyperparameters.\relax }{table.caption.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Group Relative Policy Optimization (GRPO)}{4}{subsection.4.2}\protected@file@percent }
+\newlabel{sec:grpo-method}{{4.2}{4}{Group Relative Policy Optimization (GRPO)}{subsection.4.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Training Configurations}{4}{subsection.4.3}\protected@file@percent }
+\citation{deepseek2025r1}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GRPO training configurations. All use LoRA rank=64 with binary correctness reward.\relax }}{5}{table.caption.8}\protected@file@percent }
+\newlabel{tab:grpo-configs}{{3}{5}{GRPO training configurations. All use LoRA rank=64 with binary correctness reward.\relax }{table.caption.8}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Results}{5}{section.5}\protected@file@percent }
+\newlabel{sec:results}{{5}{5}{Results}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Main Results}{5}{subsection.5.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Main results across five benchmarks. All evaluations use temperature $= 0.01$ with greedy decoding. Best results in \textbf  {bold}. $\pm $ values are 95\% confidence intervals.\relax }}{5}{table.caption.9}\protected@file@percent }
+\newlabel{tab:main-results}{{4}{5}{Main results across five benchmarks. All evaluations use temperature $= 0.01$ with greedy decoding. Best results in \textbf {bold}. $\pm $ values are 95\% confidence intervals.\relax }{table.caption.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}SFT vs.\ Reinforcement Learning}{5}{subsection.5.2}\protected@file@percent }
+\newlabel{sec:sft-vs-rl}{{5.2}{5}{SFT vs.\ Reinforcement Learning}{subsection.5.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces SFT vs.\ RL comparison. $\Delta $ is change from baseline.\relax }}{5}{table.caption.10}\protected@file@percent }
+\newlabel{tab:sft-vs-rl}{{5}{5}{SFT vs.\ RL comparison. $\Delta $ is change from baseline.\relax }{table.caption.10}{}}
+\@writefile{toc}{\contentsline {paragraph}{SFT warm-start provides no benefit.}{6}{section*.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}GRPO Ablation: Data Difficulty and Context Length}{6}{subsection.5.3}\protected@file@percent }
+\newlabel{sec:grpo-ablation}{{5.3}{6}{GRPO Ablation: Data Difficulty and Context Length}{subsection.5.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Effect of training data difficulty and generation context length.\relax }}{6}{table.caption.12}\protected@file@percent }
+\newlabel{tab:grpo-ablation}{{6}{6}{Effect of training data difficulty and generation context length.\relax }{table.caption.12}{}}
+\@writefile{toc}{\contentsline {paragraph}{Hard problems provide more informative signal.}{6}{section*.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Longer context enables complete reasoning chains.}{6}{section*.14}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Effect of Continued Training}{6}{subsection.5.4}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Continued training (v3) vs.\ initial training (v2).\relax }}{6}{table.caption.15}\protected@file@percent }
+\newlabel{tab:v3-vs-v2}{{7}{6}{Continued training (v3) vs.\ initial training (v2).\relax }{table.caption.15}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}LoRA vs.\ Full-Parameter Training}{7}{subsection.5.5}\protected@file@percent }
+\newlabel{sec:lora-vs-fullparam}{{5.5}{7}{LoRA vs.\ Full-Parameter Training}{subsection.5.5}{}}
+\@writefile{toc}{\contentsline {paragraph}{Hardware constraints necessitate hyperparameter compromises.}{7}{section*.16}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces LoRA vs.\ full-parameter GRPO on H100 80GB. Both use identical generation budget ($K=8$, max tokens $= 2048$) and training data (MATH Level 4--5).\relax }}{7}{table.caption.17}\protected@file@percent }
+\newlabel{tab:lora-vs-full}{{8}{7}{LoRA vs.\ full-parameter GRPO on H100 80GB. Both use identical generation budget ($K=8$, max tokens $= 2048$) and training data (MATH Level 4--5).\relax }{table.caption.17}{}}
+\@writefile{toc}{\contentsline {paragraph}{LoRA matches full-parameter accuracy in 50$\times $ fewer steps.}{7}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{LoRA saturates and overfits quickly at high learning rates.}{7}{section*.19}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Generation budget dominates over parameterization.}{7}{section*.20}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces Impact of generation budget: cloud LoRA (large budget) vs.\ local methods (small budget).\relax }}{7}{table.caption.21}\protected@file@percent }
+\newlabel{tab:gen-budget}{{9}{7}{Impact of generation budget: cloud LoRA (large budget) vs.\ local methods (small budget).\relax }{table.caption.21}{}}
+\@writefile{toc}{\contentsline {paragraph}{GPU memory analysis.}{7}{section*.22}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {10}{\ignorespaces GPU memory budget (H100 80GB) for GRPO training.\relax }}{8}{table.caption.23}\protected@file@percent }
+\newlabel{tab:memory}{{10}{8}{GPU memory budget (H100 80GB) for GRPO training.\relax }{table.caption.23}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}Majority Voting (Inference-Time Scaling)}{8}{subsection.5.6}\protected@file@percent }
+\newlabel{sec:majority-voting}{{5.6}{8}{Majority Voting (Inference-Time Scaling)}{subsection.5.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {11}{\ignorespaces Majority voting results for GRPO v2 at temperature $= 0.7$.\relax }}{8}{table.caption.24}\protected@file@percent }
+\newlabel{tab:majority-voting}{{11}{8}{Majority voting results for GRPO v2 at temperature $= 0.7$.\relax }{table.caption.24}{}}
+\@writefile{toc}{\contentsline {paragraph}{maj@16 is the optimal voting budget.}{8}{section*.25}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{The gap between maj@$k$ and pass@$k$ reveals the verifier opportunity.}{8}{section*.26}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}SFT Experiments Detail}{8}{section.6}\protected@file@percent }
+\newlabel{sec:sft-detail}{{6}{8}{SFT Experiments Detail}{section.6}{}}
+\citation{openr1}
+\@writefile{lot}{\contentsline {table}{\numberline {12}{\ignorespaces SFT hyperparameter sweep. All configurations use LoRA rank=64.\relax }}{9}{table.caption.27}\protected@file@percent }
+\newlabel{tab:sft-sweep}{{12}{9}{SFT hyperparameter sweep. All configurations use LoRA rank=64.\relax }{table.caption.27}{}}
+\@writefile{toc}{\contentsline {paragraph}{OpenR1-Math-220k traces cause catastrophic regression.}{9}{section*.28}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Interpretation.}{9}{section*.29}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Analysis and Discussion}{9}{section.7}\protected@file@percent }
+\newlabel{sec:discussion}{{7}{9}{Analysis and Discussion}{section.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Why RL Succeeds Where SFT Fails}{9}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}The Generation Budget Hypothesis}{9}{subsection.7.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}Training Efficiency: LoRA's Advantage}{10}{subsection.7.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.4}Limitations}{10}{subsection.7.4}\protected@file@percent }
+\bibstyle{plainnat}
+\bibcite{cobbe2021gsm8k}{{1}{2021}{{Cobbe et al.}}{{}}}
+\bibcite{deepseek2025r1}{{2}{2025}{{DeepSeek-AI}}{{}}}
+\bibcite{he2024olympiadbench}{{3}{2024}{{He et al.}}{{}}}
+\bibcite{hendrycks2021measuring}{{4}{2021}{{Hendrycks et al.}}{{}}}
+\bibcite{hinton2015distilling}{{5}{2015}{{Hinton et al.}}{{}}}
+\bibcite{hu2022lora}{{6}{2022}{{Hu et al.}}{{}}}
+\bibcite{kwon2023vllm}{{7}{2023}{{Kwon et al.}}{{}}}
+\bibcite{lambert2024rlvr}{{8}{2024}{{Lambert et al.}}{{}}}
+\bibcite{lightman2024lets}{{9}{2024}{{Lightman et al.}}{{}}}
+\bibcite{mukherjee2023orca}{{10}{2023}{{Mukherjee et al.}}{{}}}
+\@writefile{toc}{\contentsline {section}{\numberline {8}Conclusion}{11}{section.8}\protected@file@percent }
+\bibcite{openr1}{{11}{2025}{{OpenR1}}{{}}}
+\bibcite{qwq32b}{{12}{2024}{{QwQ Team}}{{}}}
+\bibcite{shao2024deepseekmath}{{13}{2024}{{Shao et al.}}{{}}}
+\bibcite{tinker2025}{{14}{2025}{{Tinker}}{{}}}
+\bibcite{vonwerra2022trl}{{15}{2022}{{von Werra et al.}}{{}}}
+\bibcite{wang2023selfconsistency}{{16}{2023}{{Wang et al.}}{{}}}
+\bibcite{yu2024metamath}{{17}{2024}{{Yu et al.}}{{}}}
+\gdef \@abspage@last{12}

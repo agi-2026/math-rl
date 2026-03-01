@@ -12,7 +12,11 @@
       "Bash(find /tmp -name \"*eval.json\" -newer /tmp/claude-0 -exec cat {} ;)",
       "Bash(cat:*)",
       "Bash(nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader)",
-      "Bash(xargs ls -lh)"
+      "Bash(xargs ls -lh)",
+      "Bash(ls /tmp/*eval*.json)",
+      "Bash(dpkg -l texlive-latex-base)",
+      "Bash(apt-get install -y texlive-latex-base texlive-latex-extra texlive-fonts-recommended texlive-science)",
+      "Bash(pdflatex -interaction=nonstopmode main.tex)"
     ]
   }
 }
