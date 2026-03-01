@@ -1,3 +1,4 @@
+.claude/
 data/
 # results/ — tracked for reproducibility
 __pycache__/
