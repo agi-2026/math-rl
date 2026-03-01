@@ -31,6 +31,7 @@ All models evaluated with temperature=0.01, greedy-ish decoding, and 95% confide
 | **GRPO v2** (hard problems) | **90.2% ±2.6** | **43.3% ±17.7** | 26.7% ±15.8 | 93.8% ±1.3 | **63.6% ±3.9** |
 | **GRPO v3** (continued) | 90.6% ±2.6 | 36.7% ±17.2 | **30.0% ±16.4** | **94.0% ±1.3** | 64.0% ±3.9 |
 | **GRPO local** (full-param, H100) | 87.8% ±2.9 | 26.7% ±15.8 | 26.7% ±15.8 | 94.4% ±1.2 | 58.9% ±4.0 |
+| **GRPO local LoRA** (step-50, H100) | 87.2% ±2.9 | 30.0% ±16.4 | 26.7% ±15.8 | 93.9% ±1.3 | 60.0% ±4.0 |
 
 ### Key Takeaways
 
@@ -190,6 +191,41 @@ python scripts/8_eval_local.py --checkpoint /tmp/tinker-math/grpo_local_fullpara
     --benchmarks math500,aime2024,aime2025,gsm8k,olympiadbench
 ```
 
+### Phase 9: Local LoRA GRPO
+
+To control for whether the full-param vs LoRA distinction (or the hyperparameter differences) explains the gap with Tinker v2, we ran local LoRA GRPO using the same infrastructure as Phase 7 but with PEFT LoRA adapters.
+
+**Configuration:**
+| Parameter | Value | vs Full-param (Phase 7) |
+|-----------|-------|--------------------|
+| Method | LoRA (rank=64, alpha=64) | Full-parameter |
+| Framework | TRL GRPOTrainer + PEFT + vLLM colocate | Same |
+| Learning rate | 4e-5 | 5e-6 |
+| Batch size | 8 × 8 grad accum = 64 effective | Same |
+| Group size (K) | 8 | Same |
+| Max completion tokens | 2048 | Same |
+| Training data | MATH Level 4-5 (3,994 problems) | Same |
+| Trainable params | ~160M (4% of total) | 4B (100%) |
+
+**Key findings:**
+- LoRA saturates by ~50 steps (reward → 0.95, grad_norm → 0). Step-100 shows slight degradation.
+- Step-50 matches full-param results (87.2% vs 87.8% MATH-500) with **50x fewer steps** (50 vs 998)
+- Step-50 beats full-param on AIME 2024 (30.0% vs 26.7%) and OlympiadBench (60.0% vs 58.9%)
+- Both local methods trail Tinker v2 — confirming that **generation budget** (context length × group size) is the dominant factor, not LoRA vs full-param
+
+```bash
+# Training
+python scripts/9_grpo_local_lora.py --num-epochs 2 --lr 4e-5 --lora-rank 64 \
+    --batch-size 8 --grad-accum 8 --num-generations 8 --max-completion-length 2048 --save-steps 50
+
+# Merge LoRA adapters into base model for eval
+python /tmp/merge_and_eval_lora.py  # merges checkpoint-50 and checkpoint-100
+
+# Evaluate
+python scripts/8_eval_local.py --checkpoint /tmp/tinker-math/grpo_local_lora/merged-step50 \
+    --benchmarks math500,aime2024,aime2025,gsm8k,olympiadbench
+```
+
 ### Phase 4: Evaluation
 
 Unified evaluation across 5 benchmarks with consistent protocol.
@@ -238,9 +274,7 @@ python scripts/4_eval.py --experiments baseline,sft_custom,direct_rl,sft_then_rl
 
 5. **Extended training at low LR.** GRPO v3 (2 more epochs at half LR) adds only +0.4pp over v2, suggesting the model is near its single-sample ceiling at this scale.
 
-6. **Full-parameter training with constrained hyperparameters.** Local full-param GRPO on H100 (87.8% MATH-500) underperformed LoRA GRPO v2 (90.2%). Memory constraints forced shorter completions (2048 vs 4096 tokens) and smaller group size (8 vs 16), which matter more than the LoRA bottleneck.
-
-6. **LoRA with right hyperparameters beats naive full-parameter training.** Local full-param GRPO on H100 (87.8% MATH-500) underperforms Tinker LoRA GRPO v2 (90.2%), likely due to reduced max_completion_length (2048 vs 4096) and smaller group_size (8 vs 16) needed to fit in GPU memory. See [Phase 7](#phase-7-local-full-parameter-grpo) for details.
+6. **Constrained generation budget.** Both local full-param (87.8%) and local LoRA (87.2%) trail Tinker v2 (90.2%) on MATH-500. All local runs used max_completion=2048, group_size=8 (vs 4096/16 for Tinker), confirming that **generation budget matters more than LoRA vs full-param**. Local LoRA step-50 matched full-param accuracy in 50 steps (vs 998), showing LoRA efficiency, but neither local approach overcomes the shorter context limitation.
 
 ---
 
@@ -281,6 +315,7 @@ howard/
 │   ├── 6_combine_data.py          # Merge multiple trace JSONL files
 │   ├── 7_grpo_local.py            # Local full-param GRPO (TRL + vLLM on H100)
 │   ├── 8_eval_local.py            # Evaluate local HF checkpoints (vLLM)
+│   ├── 9_grpo_local_lora.py       # Local LoRA GRPO (TRL + PEFT + vLLM on H100)
 │   └── utils/
 │       ├── data.py                # Data loaders (GSM8K, MATH, AIME, OlympiadBench)
 │       └── tinker_helpers.py      # Tinker client setup, model constants
@@ -308,6 +343,8 @@ All checkpoints are stored at `/tmp/tinker-math/` on the training machine:
 | `grpo_v2` | GRPO v2 (MATH Level 4-5, 124 batches, 4096 tokens) | **Best for AIME 2024 (43.3%)** |
 | `grpo_v3` | Continued from v2, LR=2e-5, 2 more epochs | **Best for MATH-500 (90.6%)** |
 | `grpo_local_fullparam/final` | Full-param GRPO via TRL on H100, 2 epochs, 13h | LoRA vs full-param comparison |
+| `grpo_local_lora/merged-step50` | Local LoRA GRPO step-50 (merged into base), ~50 min | **Best local LoRA** |
+| `grpo_local_lora/merged-step100` | Local LoRA GRPO step-100 (merged), overfitted | Early stopping comparison |
 
 ---
 
@@ -358,6 +395,18 @@ python scripts/7_grpo_local.py --num-epochs 2 --batch-size 8 --grad-accum 8 \
 
 # Evaluate local checkpoint
 python scripts/8_eval_local.py --checkpoint /tmp/tinker-math/grpo_local_fullparam/final \
+    --benchmarks math500,aime2024,aime2025,gsm8k,olympiadbench
+```
+
+### Local LoRA GRPO (H100)
+
+```bash
+# Train LoRA (saturates by step ~50 at LR=4e-5)
+python scripts/9_grpo_local_lora.py --num-epochs 2 --lr 4e-5 --lora-rank 64 \
+    --batch-size 8 --grad-accum 8 --num-generations 8 --max-completion-length 2048 --save-steps 50
+
+# Evaluate merged checkpoint
+python scripts/8_eval_local.py --checkpoint /tmp/tinker-math/grpo_local_lora/merged-step50 \
     --benchmarks math500,aime2024,aime2025,gsm8k,olympiadbench
 ```
 

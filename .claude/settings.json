@@ -9,7 +9,10 @@
       "Bash(/root/howard/.venv/bin/pip install \"vllm==0.12.0\")",
       "Bash(nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader)",
       "Bash(nvidia-smi --query-gpu=memory.used,memory.total,memory.free --format=csv,noheader)",
-      "Bash(find /tmp -name \"*eval.json\" -newer /tmp/claude-0 -exec cat {} ;)"
+      "Bash(find /tmp -name \"*eval.json\" -newer /tmp/claude-0 -exec cat {} ;)",
+      "Bash(cat:*)",
+      "Bash(nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader)",
+      "Bash(xargs ls -lh)"
     ]
   }
 }
