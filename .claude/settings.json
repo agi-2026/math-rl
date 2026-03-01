@@ -16,7 +16,9 @@
       "Bash(ls /tmp/*eval*.json)",
       "Bash(dpkg -l texlive-latex-base)",
       "Bash(apt-get install -y texlive-latex-base texlive-latex-extra texlive-fonts-recommended texlive-science)",
-      "Bash(pdflatex -interaction=nonstopmode main.tex)"
+      "Bash(pdflatex -interaction=nonstopmode main.tex)",
+      "Bash(nvidia-smi --query-gpu=memory.used --format=csv,noheader)",
+      "Read(//tmp/tinker-math/grpo_local_lora/merged-step100/**)"
     ]
   }
 }
